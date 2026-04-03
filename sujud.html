@@ -1,0 +1,238 @@
+<!-- بسم الله الرحمن الرحيم -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sujud — Epicycles</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#0a0a0f; display:flex; align-items:center; justify-content:center; height:100vh; overflow:hidden; }
+canvas { display:block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+(function(){
+'use strict';
+const TAU = Math.PI * 2;
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+function resize() {
+  const s = Math.min(window.innerWidth, window.innerHeight, 720);
+  canvas.width = canvas.height = s;
+  canvas.style.width = canvas.style.height = s + 'px';
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ── Sujud silhouette — clean non-self-intersecting arch ──────────────────────
+// No crossing lines. Pure outer boundary only.
+// Head circle left → arch rises to posterior peak → descends to foot right → ground → back
+const RAW_PTS = [
+  // Head: back (leftmost)
+  [-0.54, 0.48],
+  [-0.58, 0.36],
+  [-0.54, 0.24],
+  [-0.44, 0.18],
+  // Forehead (front of head, slightly less left)
+  [-0.34, 0.22],
+  [-0.28, 0.32],
+  [-0.26, 0.46],
+  // Chin / neck area — beginning of torso contour going up-right
+  [-0.22, 0.52],
+  [-0.16, 0.44],
+  // Spine rises steeply to posterior peak
+  [-0.06, 0.26],
+  [ 0.06, 0.08],
+  [ 0.16, 0.00],
+  [ 0.22,-0.04],  // ← PEAK
+  [ 0.28, 0.02],
+  // Hip / thigh descends right
+  [ 0.30, 0.18],
+  [ 0.30, 0.36],
+  [ 0.28, 0.52],
+  // Knee / shin
+  [ 0.30, 0.60],
+  // Foot (tucked, toes pointing left)
+  [ 0.40, 0.64],
+  [ 0.48, 0.62],
+  [ 0.46, 0.56],
+  // Ground line left
+  [ 0.30, 0.66],
+  [ 0.10, 0.66],
+  [-0.10, 0.66],
+  [-0.30, 0.66],
+  [-0.44, 0.64],
+  [-0.54, 0.60],
+  [-0.58, 0.54],
+];
+
+// ── Catmull-Rom smooth ────────────────────────────────────────────────────────
+function catmullRom(p0,p1,p2,p3,t) {
+  const t2=t*t, t3=t2*t;
+  return {
+    x:0.5*((2*p1.x)+(-p0.x+p2.x)*t+(2*p0.x-5*p1.x+4*p2.x-p3.x)*t2+(-p0.x+3*p1.x-3*p2.x+p3.x)*t3),
+    y:0.5*((2*p1.y)+(-p0.y+p2.y)*t+(2*p0.y-5*p1.y+4*p2.y-p3.y)*t2+(-p0.y+3*p1.y-3*p2.y+p3.y)*t3)
+  };
+}
+function smoothPath(pts, steps) {
+  const raw = pts.map(p=>({x:p[0],y:p[1]}));
+  const N = raw.length, out = [];
+  for (let i=0;i<N;i++) {
+    const p0=raw[(i-1+N)%N],p1=raw[i],p2=raw[(i+1)%N],p3=raw[(i+2)%N];
+    for (let s=0;s<steps;s++) out.push(catmullRom(p0,p1,p2,p3,s/steps));
+  }
+  return out;
+}
+function resample(pts,N) {
+  const lens=[0];
+  for(let i=1;i<pts.length;i++){const dx=pts[i].x-pts[i-1].x,dy=pts[i].y-pts[i-1].y;lens.push(lens[i-1]+Math.sqrt(dx*dx+dy*dy));}
+  const total=lens[lens.length-1],out=[];
+  for(let i=0;i<N;i++){const tgt=(i/N)*total;let j=0;while(j<lens.length-2&&lens[j+1]<=tgt)j++;const t=(tgt-lens[j])/(lens[j+1]-lens[j]+1e-9);const a=pts[Math.min(j,pts.length-1)],b=pts[Math.min(j+1,pts.length-1)];out.push({x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t});}
+  return out;
+}
+function dft(signal) {
+  const N=signal.length,res=[];
+  for(let k=0;k<N;k++){let re=0,im=0;for(let n=0;n<N;n++){const phi=TAU*k*n/N;re+=signal[n].x*Math.cos(phi)+signal[n].y*Math.sin(phi);im+=-signal[n].x*Math.sin(phi)+signal[n].y*Math.cos(phi);}res.push({freq:k,amp:Math.sqrt(re*re+im*im)/N,phase:Math.atan2(im,re)});}
+  return res.sort((a,b)=>b.amp-a.amp);
+}
+
+const smooth   = smoothPath(RAW_PTS, 6);
+const sampled  = resample(smooth, 256);
+const freqs    = dft(sampled).slice(0, 12);
+
+// ── Animation state ───────────────────────────────────────────────────────────
+let t = 0;
+let trail = [];
+let phase = 'drawing'; // drawing | holding | fading
+let holdMs = 0;
+const DRAW_SPEED   = 0.0018; // slow enough to watch
+const HOLD_MS      = 2400;
+const FADE_MS      = 800;
+let fadeAlpha      = 1.0;
+let lastTs         = null;
+let paused         = false;
+
+function evalEpicycles(freqs, t) {
+  const s = canvas.width, scale = s * 0.38, cx = s/2, cy = s * 0.48;
+  let x=cx, y=cy;
+  const arms = [];
+  for (const f of freqs) {
+    const angle = f.freq * t * TAU + f.phase;
+    const nx = x + f.amp * scale * Math.cos(angle);
+    const ny = y + f.amp * scale * Math.sin(angle);
+    arms.push({x0:x, y0:y, x1:nx, y1:ny, r:f.amp*scale});
+    x=nx; y=ny;
+  }
+  return {tip:{x,y}, arms};
+}
+
+function draw(ts) {
+  if (!lastTs) lastTs = ts;
+  const dt = Math.min((ts - lastTs) / 1000, 0.05);
+  lastTs = ts;
+
+  const s = canvas.width;
+  ctx.fillStyle = '#0a0a0f';
+  ctx.fillRect(0, 0, s, s);
+
+  if (!paused && phase === 'drawing') {
+    t += DRAW_SPEED * 60 * dt;
+    if (t >= 1) { t = 1; phase = 'holding'; holdMs = 0; }
+    const {tip} = evalEpicycles(freqs, t);
+    trail.push({...tip});
+  }
+
+  if (!paused && phase === 'holding') {
+    holdMs += dt * 1000;
+    if (holdMs >= HOLD_MS) { phase = 'fading'; fadeAlpha = 1.0; }
+  }
+
+  if (!paused && phase === 'fading') {
+    fadeAlpha -= dt / (FADE_MS / 1000);
+    if (fadeAlpha <= 0) {
+      // Reset
+      t = 0; trail = []; phase = 'drawing'; holdMs = 0; fadeAlpha = 1.0;
+    }
+  }
+
+  const showArms  = phase === 'drawing';
+  const trailAlpha = phase === 'fading' ? Math.max(0, fadeAlpha) : 1.0;
+
+  const {tip, arms} = evalEpicycles(freqs, t);
+
+  // Draw epicycle circles
+  if (showArms) {
+    for (const a of arms) {
+      if (a.r < 1.5) continue;
+      ctx.beginPath();
+      ctx.arc(a.x0, a.y0, a.r, 0, TAU);
+      ctx.strokeStyle = 'rgba(120,180,255,0.10)';
+      ctx.lineWidth = 0.8;
+      ctx.stroke();
+    }
+    // Draw arms (lines)
+    for (const a of arms) {
+      ctx.beginPath();
+      ctx.moveTo(a.x0, a.y0);
+      ctx.lineTo(a.x1, a.y1);
+      ctx.strokeStyle = 'rgba(140,195,255,0.38)';
+      ctx.lineWidth = 1.0;
+      ctx.stroke();
+    }
+    // Tip dot
+    ctx.beginPath();
+    ctx.arc(tip.x, tip.y, 3.5, 0, TAU);
+    ctx.fillStyle = 'rgba(255,255,255,0.96)';
+    ctx.fill();
+  }
+
+  // Draw trail
+  if (trail.length > 1) {
+    ctx.beginPath();
+    ctx.moveTo(trail[0].x, trail[0].y);
+    for (let i = 1; i < trail.length; i++) ctx.lineTo(trail[i].x, trail[i].y);
+    if (!showArms) ctx.closePath();
+    ctx.strokeStyle = `rgba(215,232,255,${0.92 * trailAlpha})`;
+    ctx.lineWidth = phase === 'fading' ? 2.0 : 1.6;
+    ctx.lineJoin = 'round';
+    ctx.lineCap  = 'round';
+    ctx.stroke();
+  }
+
+  requestAnimationFrame(draw);
+}
+
+// Expose control
+window.salah = {
+  pause()  { paused = true; },
+  resume() { paused = false; },
+  forceComplete(idx) {
+    t = 1;
+    trail = [];
+    const N = 256;
+    for (let i = 0; i <= N; i++) {
+      const {tip} = evalEpicycles(freqs, i/N);
+      trail.push({...tip});
+    }
+    phase = 'holding'; holdMs = 0;
+    drawFrame();
+  }
+};
+
+function drawFrame() {
+  const s = canvas.width;
+  ctx.fillStyle = '#0a0a0f';
+  ctx.fillRect(0,0,s,s);
+  const {arms,tip} = evalEpicycles(freqs,1);
+  if(trail.length>1){ctx.beginPath();ctx.moveTo(trail[0].x,trail[0].y);for(let i=1;i<trail.length;i++)ctx.lineTo(trail[i].x,trail[i].y);ctx.closePath();ctx.strokeStyle='rgba(215,232,255,0.94)';ctx.lineWidth=1.8;ctx.lineJoin='round';ctx.stroke();}
+}
+
+requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>
