@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sujud — Double Pendulum</title>
+<title>Sujud — Constructivist Epicycles</title>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
 body { background:#0a0a0f; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; overflow:hidden; }
@@ -20,264 +20,191 @@ canvas { display:block; }
 'use strict';
 const TAU = Math.PI * 2;
 const canvas = document.getElementById('c');
-const ctx = canvas.getContext('2d');
-
+const ctx    = canvas.getContext('2d');
 let S;
-function resize() {
-  S = Math.min(window.innerWidth, window.innerHeight - 50, 720);
+function resize(){
+  S = Math.min(window.innerWidth, window.innerHeight-50, 720);
   canvas.width = canvas.height = S;
-  canvas.style.width = canvas.style.height = S + 'px';
+  canvas.style.width = canvas.style.height = S+'px';
 }
-resize();
-window.addEventListener('resize', resize);
+resize(); window.addEventListener('resize', resize);
 
-// px: normalised (-1..1) → canvas pixels
-const SCALE = 0.36;
-// Pivot placed above/behind the figure centroid so arms can reach all points
-// Figure spans roughly x:-0.6..0.5, y:0.0..0.6 → centroid ~(-0.05, 0.35)
-// Place pivot at (-0.05, -0.50) — directly above, arm lengths cover ~0.85 units
-const OX = () => S/2 + (-0.05) * S * SCALE;
-const OY = () => S/2 + (-0.52) * S * SCALE;
-function px(nx, ny) { return [OX() + nx*S*SCALE, OY() + ny*S*SCALE]; }
+// normalised → pixel
+function px(nx,ny){ return [S/2+nx*S*0.38, S/2+ny*S*0.38]; }
 
-// ── Sujud silhouette waypoints ────────────────────────────────────────────────
-// Traced carefully as a single continuous path (no self-crossings).
-// Starts at head-back, traces the outer arch, ends back near head.
-const WAYPOINTS_N = [
-  // Back of head
-  [-0.54, 0.30],
-  [-0.56, 0.18],
-  [-0.50, 0.08],
-  // Top of head
-  [-0.40, 0.04],
-  // Face/forehead
-  [-0.30, 0.10],
-  [-0.26, 0.22],
-  [-0.26, 0.36],
-  // Chin — connect to shoulder/arm region
-  [-0.26, 0.44],
-  // Left arm reaching forward
-  [-0.38, 0.46],
-  [-0.52, 0.48],
-  [-0.60, 0.50],
-  // Right forearm (going right from chin area)
-  [-0.14, 0.46],
-  [-0.02, 0.46],
-  // Shoulder — start of spine arch
-  [-0.20, 0.36],
-  [-0.10, 0.22],
-  // Spine rising to posterior
-  [ 0.00, 0.06],
-  [ 0.10,-0.06],
-  [ 0.18,-0.14],  // posterior peak
-  [ 0.24,-0.08],
-  // Hip/thigh descending
-  [ 0.28, 0.10],
-  [ 0.30, 0.28],
-  [ 0.28, 0.44],
-  // Knee area
-  [ 0.26, 0.52],
-  // Foot
-  [ 0.36, 0.56],
-  [ 0.46, 0.54],
-  [ 0.50, 0.48],
-  // Ground line — sweep back left
-  [ 0.34, 0.58],
-  [ 0.10, 0.58],
-  [-0.10, 0.58],
-  [-0.30, 0.58],
-  [-0.50, 0.56],
-  // Back to head start
-  [-0.54, 0.44],
-  [-0.54, 0.34],
+// ── Exact epicycle chains ─────────────────────────────────────────────────────
+
+// CIRCLE: 1 arm
+function circleChain(cx,cy,r){
+  const [pcx,pcy]=px(cx,cy), pr=r*S*0.38;
+  return [{dc:true,x:pcx,y:pcy},{freq:1,amp:pr,phase:0}];
+}
+
+// LINE P1→P2: 2 counter-rotating arms
+// traces P1→P2 at t=0..0.5, back at t=0.5..1 → use tMax=0.5
+function lineChain(x1,y1,x2,y2){
+  const [mx,my]=px((x1+x2)/2,(y1+y2)/2);
+  const [p1x,p1y]=px(x1,y1), [p2x,p2y]=px(x2,y2);
+  const hx=(p2x-p1x)/2, hy=(p2y-p1y)/2;
+  const amp=Math.sqrt(hx*hx+hy*hy), phi=Math.atan2(hy,hx);
+  return [
+    {dc:true,x:mx,y:my},
+    {freq:+1,amp,phase:phi+Math.PI},
+    {freq:-1,amp,phase:phi+Math.PI},
+  ];
+}
+
+// ROTATED RECTANGLE corner helpers
+function rectCorners(cx,cy,w,h,angle){
+  const corners=[[-w,-h],[w,-h],[w,h],[-w,h]];
+  return corners.map(([lx,ly])=>[
+    lx*Math.cos(angle)-ly*Math.sin(angle)+cx,
+    lx*Math.sin(angle)+ly*Math.cos(angle)+cy,
+  ]);
+}
+
+// ── Eval ─────────────────────────────────────────────────────────────────────
+function evalChain(chain,t){
+  let x=0,y=0; const arms=[];
+  for(const c of chain){
+    let nx,ny;
+    if(c.dc){nx=c.x;ny=c.y;}
+    else{
+      const a=c.freq*TAU*t+(c.phase||0);
+      nx=x+c.amp*Math.cos(a); ny=y+c.amp*Math.sin(a);
+      if(c.amp>2) arms.push({x0:x,y0:y,x1:nx,y1:ny,r:c.amp});
+    }
+    x=nx;y=ny;
+  }
+  return {tip:{x,y},arms};
+}
+
+// ── Sujud stroke list ─────────────────────────────────────────────────────────
+// Constructivist: head circle, forearms (lines), tilted back rectangle (4 edges), knee circle, foot line
+
+const A = -Math.PI*0.30; // ~54° tilt for back/torso rectangle
+const RC = rectCorners(-0.06,0.10, 0.14,0.50, A); // [TL,TR,BR,BL]
+
+const STROKES = [
+  // 1. Head circle
+  { chain: circleChain(-0.46, 0.26, 0.14),
+    tMax:1, color:[215,230,255], lw:2.0, close:false },
+
+  // 2. Left forearm
+  { chain: lineChain(-0.30,0.38, -0.64,0.46),
+    tMax:0.5, color:[160,195,245], lw:1.4, close:false },
+
+  // 3. Right forearm
+  { chain: lineChain(-0.30,0.38, -0.06,0.36),
+    tMax:0.5, color:[160,195,245], lw:1.4, close:false },
+
+  // 4–7. Back rectangle — 4 edges (TL→TR, TR→BR, BR→BL, BL→TL)
+  { chain: lineChain(...RC[0], ...RC[1]),
+    tMax:0.5, color:[215,230,255], lw:2.2, close:false },
+  { chain: lineChain(...RC[1], ...RC[2]),
+    tMax:0.5, color:[215,230,255], lw:2.2, close:false },
+  { chain: lineChain(...RC[2], ...RC[3]),
+    tMax:0.5, color:[215,230,255], lw:2.2, close:false },
+  { chain: lineChain(...RC[3], ...RC[0]),
+    tMax:0.5, color:[215,230,255], lw:2.2, close:false },
+
+  // 8. Knee circle (small)
+  { chain: circleChain(0.28, 0.46, 0.07),
+    tMax:1, color:[160,195,245], lw:1.6, close:false },
+
+  // 9. Foot line
+  { chain: lineChain(0.32,0.54, 0.54,0.56),
+    tMax:0.5, color:[160,195,245], lw:1.4, close:false },
+
+  // 10. Ground
+  { chain: lineChain(-0.68,0.62, 0.62,0.62),
+    tMax:0.5, color:[75,108,160], lw:0.7, close:false },
 ];
 
-// Resample waypoints to dense equidistant path
-function resample(pts, N) {
-  const lens = [0];
-  for (let i=1; i<pts.length; i++) {
-    const dx=pts[i][0]-pts[i-1][0], dy=pts[i][1]-pts[i-1][1];
-    lens.push(lens[i-1]+Math.sqrt(dx*dx+dy*dy));
+// ── Animation ─────────────────────────────────────────────────────────────────
+const DRAW_SPEED  = 0.020;
+const HOLD_FRAMES = 120;
+
+let idx=0, t=0;
+let trails = STROKES.map(()=>[]);
+let phase='drawing', holding=0, lastTs=null, paused=false;
+
+function drawArms(arms){
+  for(const a of arms){
+    if(a.r<2) continue;
+    ctx.beginPath(); ctx.arc(a.x0,a.y0,a.r,0,TAU);
+    ctx.strokeStyle='rgba(120,175,255,0.09)'; ctx.lineWidth=0.7; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(a.x0,a.y0); ctx.lineTo(a.x1,a.y1);
+    ctx.strokeStyle='rgba(140,190,255,0.32)'; ctx.lineWidth=0.9; ctx.stroke();
   }
-  const total = lens[lens.length-1];
-  const out = [];
-  for (let i=0; i<N; i++) {
-    const tgt = (i/(N-1))*total;
-    let j=0; while(j<lens.length-2&&lens[j+1]<tgt) j++;
-    const t=(tgt-lens[j])/(lens[j+1]-lens[j]+1e-9);
-    out.push([
-      pts[j][0]+(pts[j+1][0]-pts[j][0])*t,
-      pts[j][1]+(pts[j+1][1]-pts[j][1])*t,
-    ]);
-  }
-  return out;
 }
 
-const PATH = resample(WAYPOINTS_N, 320);
-
-// ── 2-link IK pendulum ────────────────────────────────────────────────────────
-// Pivot fixed at canvas origin (0,0 in normalised space).
-// Two arms of length L1, L2. Tip traces PATH.
-
-const L1 = 0.60;  // upper arm length (normalised)
-const L2 = 0.60;  // lower arm length
-
-// Solve IK: given target (tx,ty), return {a1, a2} or null
-// a1 = angle of first arm from vertical, a2 = elbow joint angle (relative)
-function solveIK(tx, ty) {
-  const d2 = tx*tx + ty*ty;
-  const d  = Math.sqrt(d2);
-  if (d > L1+L2-0.001) return null; // unreachable
-  if (d < Math.abs(L1-L2)+0.001) return null; // too close
-
-  const cosA2 = (d2 - L1*L1 - L2*L2) / (2*L1*L2);
-  const a2 = Math.acos(Math.max(-1, Math.min(1, cosA2)));
-
-  const k1 = L1 + L2*Math.cos(a2);
-  const k2 = L2*Math.sin(a2);
-  const a1 = Math.atan2(ty, tx) - Math.atan2(k2, k1);
-
-  return { a1, a2 };
+function drawTrail(pts,rgb,lw){
+  if(pts.length<2) return;
+  ctx.beginPath(); ctx.moveTo(pts[0].x,pts[0].y);
+  for(let i=1;i<pts.length;i++) ctx.lineTo(pts[i].x,pts[i].y);
+  ctx.strokeStyle=`rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.90)`;
+  ctx.lineWidth=lw; ctx.lineJoin='round'; ctx.lineCap='round'; ctx.stroke();
 }
 
-// Smooth angle interpolation (shortest path)
-function lerpAngle(a, b, t) {
-  let d = b - a;
-  while (d >  Math.PI) d -= TAU;
-  while (d < -Math.PI) d += TAU;
-  return a + d * t;
-}
+function tick(ts){
+  if(!lastTs) lastTs=ts;
+  const dt=Math.min((ts-lastTs)/1000,0.05); lastTs=ts;
 
-// ── Animation state ───────────────────────────────────────────────────────────
-let pathIdx   = 0;
-let a1        = -Math.PI/2;  // initial angles pointing up
-let a2        = 0;
-let trail     = [];
-let phase     = 'drawing';   // drawing | holding | resetting
-let holdMs    = 0;
-let lastTs    = null;
-let paused    = false;
+  ctx.fillStyle='#0a0a0f'; ctx.fillRect(0,0,S,S);
 
-const SPEED      = 1.8;   // path points per frame at 60fps
-const HOLD_MS    = 2200;
-const ARM_LERP   = 0.18;  // how fast arms track target (lower = more pendulum-like swing)
-
-// Compute target IK for current path point
-function targetAngles(idx) {
-  const [tx, ty] = PATH[idx % PATH.length];
-  return solveIK(tx, ty);
-}
-
-// Elbow position from angles
-function elbowPos() {
-  const [ox,oy] = [OX(), OY()];
-  return [ox + Math.cos(a1)*L1*S*SCALE, oy + Math.sin(a1)*L1*S*SCALE];
-}
-function tipPos() {
-  const [ex,ey] = elbowPos();
-  return [ex + Math.cos(a1+a2)*L2*S*SCALE, ey + Math.sin(a1+a2)*L2*S*SCALE];
-}
-
-function tick(ts) {
-  if (!lastTs) lastTs = ts;
-  const dt = Math.min((ts-lastTs)/1000, 0.05);
-  lastTs = ts;
-
-  ctx.fillStyle = '#0a0a0f';
-  ctx.fillRect(0, 0, S, S);
-
-  if (!paused) {
-    if (phase === 'drawing') {
-      // Advance path index
-      pathIdx += SPEED * 60 * dt;
-      const idx = Math.min(Math.floor(pathIdx), PATH.length-1);
-
-      // Solve IK for target point
-      const ik = targetAngles(idx);
-      if (ik) {
-        // Smooth arm movement — lerp toward target angles
-        a1 = lerpAngle(a1, ik.a1, ARM_LERP);
-        a2 = lerpAngle(a2, ik.a2, ARM_LERP);
+  if(!paused){
+    if(phase==='drawing'){
+      t+=DRAW_SPEED*60*dt;
+      const tM=STROKES[idx].tMax;
+      if(t>=tM){
+        t=tM;
+        const {tip}=evalChain(STROKES[idx].chain,t); trails[idx].push(tip);
+        idx++;
+        if(idx>=STROKES.length){phase='holding';holding=0;}
+        else{t=0;trails[idx]=[];}
+      } else {
+        const {tip}=evalChain(STROKES[idx].chain,t); trails[idx].push(tip);
       }
-
-      // Record tip trail
-      const tip = tipPos();
-      trail.push({x: tip[0], y: tip[1]});
-
-      if (pathIdx >= PATH.length) {
-        phase = 'holding'; holdMs = 0;
-      }
-    } else if (phase === 'holding') {
-      holdMs += dt * 1000;
-      if (holdMs > HOLD_MS) {
-        phase = 'resetting';
-        pathIdx = 0; trail = [];
-        const ik = targetAngles(0);
-        if (ik) { a1 = ik.a1; a2 = ik.a2; }
-        phase = 'drawing';
-      }
+    } else {
+      holding+=dt*60;
+      if(holding>HOLD_FRAMES){ idx=0;t=0;trails=STROKES.map(()=>[]);phase='drawing'; }
     }
   }
 
-  // ── Draw trail ──────────────────────────────────────────────────────────────
-  if (trail.length > 1) {
-    ctx.beginPath();
-    ctx.moveTo(trail[0].x, trail[0].y);
-    for (let i=1; i<trail.length; i++) ctx.lineTo(trail[i].x, trail[i].y);
-    ctx.strokeStyle = 'rgba(210,228,255,0.88)';
-    ctx.lineWidth = 1.6;
-    ctx.lineJoin = 'round';
-    ctx.lineCap  = 'round';
-    ctx.stroke();
+  // Completed
+  for(let i=0;i<Math.min(idx,STROKES.length);i++)
+    if(trails[i].length>1) drawTrail(trails[i],STROKES[i].color,STROKES[i].lw);
+
+  // Active
+  if(phase==='drawing'&&idx<STROKES.length){
+    const s=STROKES[idx];
+    const {tip,arms}=evalChain(s.chain,t);
+    if(trails[idx].length>1) drawTrail(trails[idx],s.color,s.lw);
+    drawArms(arms);
+    ctx.beginPath(); ctx.arc(tip.x,tip.y,3,0,TAU);
+    ctx.fillStyle='rgba(255,255,255,0.95)'; ctx.fill();
   }
-
-  // ── Draw pendulum arms ──────────────────────────────────────────────────────
-  if (phase === 'drawing') {
-    const [ox,oy] = [OX(), OY()];
-    const [ex,ey] = elbowPos();
-    const [tx,ty] = tipPos();
-
-    // Upper arm
-    ctx.beginPath();
-    ctx.moveTo(ox, oy);
-    ctx.lineTo(ex, ey);
-    ctx.strokeStyle = 'rgba(130,180,255,0.35)';
-    ctx.lineWidth = 1.2;
-    ctx.stroke();
-
-    // Lower arm
-    ctx.beginPath();
-    ctx.moveTo(ex, ey);
-    ctx.lineTo(tx, ty);
-    ctx.strokeStyle = 'rgba(130,180,255,0.28)';
-    ctx.lineWidth = 1.0;
-    ctx.stroke();
-
-    // Pivot dot
-    ctx.beginPath();
-    ctx.arc(ox, oy, 2.5, 0, TAU);
-    ctx.fillStyle = 'rgba(150,190,255,0.40)';
-    ctx.fill();
-
-    // Elbow dot
-    ctx.beginPath();
-    ctx.arc(ex, ey, 2.0, 0, TAU);
-    ctx.fillStyle = 'rgba(150,190,255,0.35)';
-    ctx.fill();
-
-    // Tip dot
-    ctx.beginPath();
-    ctx.arc(tx, ty, 3.2, 0, TAU);
-    ctx.fillStyle = 'rgba(255,255,255,0.92)';
-    ctx.fill();
-  }
-
   requestAnimationFrame(tick);
 }
 
-window.salah = {
-  pause()  { paused = true; },
-  resume() { paused = false; },
+window.salah={
+  pause(){paused=true;},
+  resume(){paused=false;},
+  forceComplete(){
+    paused=true;
+    STROKES.forEach((s,i)=>{
+      trails[i]=[];
+      const N=80;
+      for(let j=0;j<=N;j++){
+        const {tip}=evalChain(s.chain,j/N*s.tMax);
+        trails[i].push(tip);
+      }
+    });
+    idx=STROKES.length; phase='holding';
+    ctx.fillStyle='#0a0a0f'; ctx.fillRect(0,0,S,S);
+    STROKES.forEach((s,i)=>{ if(trails[i].length>1) drawTrail(trails[i],s.color,s.lw); });
+  }
 };
 
 requestAnimationFrame(tick);
