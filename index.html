@@ -105,14 +105,11 @@ function drawConstruction(alpha=1){
     if(a < 0.001) continue;
     ctx.save();
     if(d.type==='arc'){
-      const col = d.color==='head'   ? `rgba(215,228,255,${a*0.60})`
-                : d.color==='ground' ? `rgba(215,228,255,${a*0.55})`
-                :                      `rgba(215,228,255,${a*0.55})`;
+      const col = `rgba(215,228,255,${a*0.58})`;
       ctx.strokeStyle=col;
       ctx.lineWidth=0.8;
       ctx.beginPath();
-      if(d.dir===-1) ctx.arc(d.cx,d.cy,d.r,d.a1,d.a0,true);
-      else            ctx.arc(d.cx,d.cy,d.r,d.a0,d.a1,false);
+      ctx.arc(d.cx,d.cy,d.r,0,TAU); // always full circle — snaps in complete
       ctx.stroke();
     } else if(d.type==='line'){
       const col = d.color==='ground' ? `rgba(215,228,255,${a*0.55})`
