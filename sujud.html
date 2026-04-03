@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sujud</title>
+<title>Sujud — Parametric</title>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
 body { background:#070710; display:flex; align-items:center; justify-content:center; height:100vh; overflow:hidden; }
@@ -17,131 +17,241 @@ canvas { display:block; }
 (function(){
 'use strict';
 const TAU = Math.PI * 2;
+const PHI = 1.61803398875;   // golden ratio
 const canvas = document.getElementById('c');
-const ctx    = canvas.getContext('2d');
+const ctx = canvas.getContext('2d');
 let S;
 function resize(){
   S = Math.min(window.innerWidth, window.innerHeight, 720);
   canvas.width = canvas.height = S;
-  canvas.style.width = canvas.style.height = S+'px';
+  canvas.style.width = canvas.style.height = S + 'px';
 }
 resize(); window.addEventListener('resize', resize);
 
-// Precomputed FFT of Gemini sujud silhouette (top 80 frequencies)
-const FREQS = [
-  {freq:1,amp:0.41752,phase:-0.35210},
-  {freq:-1,amp:0.17972,phase:2.95496},
-  {freq:2,amp:0.15544,phase:-0.65783},
-  {freq:0,amp:0.11582,phase:1.79991},
-  {freq:4,amp:0.07711,phase:-1.31494},
-  {freq:-3,amp:0.05630,phase:2.28291},
-  {freq:3,amp:0.05527,phase:-1.80434},
-  {freq:-2,amp:0.05116,phase:2.42066},
-  {freq:-4,amp:0.04233,phase:2.85782},
-  {freq:5,amp:0.03956,phase:-1.78497},
-  {freq:-5,amp:0.02851,phase:2.45694},
-  {freq:6,amp:0.02725,phase:-2.27887},
-  {freq:-6,amp:0.01895,phase:2.63108},
-  {freq:7,amp:0.01884,phase:-2.54166},
-  {freq:-7,amp:0.01418,phase:2.68517},
-  {freq:8,amp:0.01380,phase:-2.89733},
-  {freq:-8,amp:0.01087,phase:2.87695},
-  {freq:9,amp:0.01026,phase:2.77543},
-  {freq:-9,amp:0.00881,phase:-2.94082},
-  {freq:10,amp:0.00776,phase:2.42894},
-  {freq:-10,amp:0.00690,phase:-2.71436},
-  {freq:11,amp:0.00634,phase:2.03384},
-  {freq:-11,amp:0.00568,phase:-2.44612},
-  {freq:12,amp:0.00529,phase:1.71098},
-  {freq:-12,amp:0.00477,phase:-2.16124},
-  {freq:13,amp:0.00441,phase:1.32784},
-  {freq:-13,amp:0.00399,phase:-1.82636},
-  {freq:14,amp:0.00373,phase:0.92548},
-  {freq:-14,amp:0.00341,phase:-1.48512},
-  {freq:15,amp:0.00316,phase:0.61282},
-  {freq:-15,amp:0.00282,phase:-1.14874},
-  {freq:16,amp:0.00259,phase:0.26984},
-  {freq:-16,amp:0.00233,phase:-0.82156},
-  {freq:17,amp:0.00218,phase:-0.05412},
-  {freq:-17,amp:0.00196,phase:-0.48394},
-  {freq:18,amp:0.00183,phase:-0.38512},
-  {freq:-18,amp:0.00164,phase:-0.11624},
-  {freq:19,amp:0.00154,phase:-0.68742},
-  {freq:-19,amp:0.00138,phase:0.22884},
-  {freq:20,amp:0.00131,phase:-0.99654},
-  {freq:-20,amp:0.00117,phase:0.58142},
-];
+// ── Define sujud purely through mathematical relationships ────────────────────
+// All proportions derived from φ and simple fractions.
+// Coordinate space: -1..1, y=-1 top, y=+1 bottom.
+// Figure faces left. Ground at y = 1/φ ≈ 0.618.
 
-const SC = 0.5591;
+const GY    = 1 / PHI;          // ground level  ≈  0.618
+const ARCH  = 1 / (PHI * PHI);  // arch height   ≈  0.382
+const R_HEAD = 1 / (PHI * PHI * PHI);  // head radius ≈ 0.236 * scale
+const R_KNEE = R_HEAD * (1/PHI);        // knee radius (smaller)
 
-function toCanvas(nx,ny){
-  return [S*0.5+nx*SC*S, S*0.5+ny*SC*S];
+// Key anatomical landmarks (x, y):
+const HEAD  = [-0.72, GY - R_HEAD];      // head centre, resting on ground
+const SHLDR = [-0.52, GY - R_HEAD*0.4];  // shoulder, low near head
+const APEX  = [-0.02, GY - ARCH - R_HEAD * 0.5]; // posterior peak (highest)
+const HIP   = [ 0.28, GY - ARCH * 0.3]; // hip descending
+const KNEE  = [ 0.52, GY - R_KNEE];     // knee on ground
+const FOOT  = [ 0.72, GY - R_KNEE*0.6]; // feet tucked right
+
+// ── Build parametric closed path ─────────────────────────────────────────────
+// Catmull-Rom spline through key points, closing on itself.
+// The path traces: head(circle) → neck→back arch → hip → knee(circle) → foot → ground → hands → head
+
+function catmullRom(p0, p1, p2, p3, t) {
+  const t2=t*t, t3=t2*t;
+  return [
+    0.5*((2*p1[0])+(-p0[0]+p2[0])*t+(2*p0[0]-5*p1[0]+4*p2[0]-p3[0])*t2+(-p0[0]+3*p1[0]-3*p2[0]+p3[0])*t3),
+    0.5*((2*p1[1])+(-p0[1]+p2[1])*t+(2*p0[1]-5*p1[1]+4*p2[1]-p3[1])*t2+(-p0[1]+3*p1[1]-3*p2[1]+p3[1])*t3)
+  ];
 }
 
-// Eval full chain at time t — returns tip + all arm segments
-function evalEpi(t){
-  let x=0,y=0;
-  const arms=[];
-  for(const f of FREQS){
+function buildPath() {
+  const pts = [];
+
+  // 1. Head circle (CCW from back of head)
+  const N_HEAD = 40;
+  for (let i = 0; i < N_HEAD; i++) {
+    const a = Math.PI + (TAU * i / N_HEAD); // start at back, go CCW
+    pts.push([HEAD[0] + R_HEAD * Math.cos(a), HEAD[1] + R_HEAD * Math.sin(a)]);
+  }
+
+  // 2. Neck + back spine arch (head top → apex)
+  // Spine rises from shoulder to apex: use cosine arch
+  const N_SPINE = 60;
+  for (let i = 0; i <= N_SPINE; i++) {
+    const t = i / N_SPINE;
+    const x = SHLDR[0] + (APEX[0] - SHLDR[0]) * t;
+    // Cosine arch — rises to peak naturally
+    const y = SHLDR[1] + (APEX[1] - SHLDR[1]) * t - ARCH * 0.15 * Math.sin(Math.PI * t);
+    pts.push([x, y]);
+  }
+
+  // 3. Back of thigh from apex to knee
+  const N_THIGH = 40;
+  const spineKnots = [APEX, HIP, KNEE];
+  for (let i = 0; i < N_THIGH; i++) {
+    const t = i / N_THIGH;
+    const seg = Math.floor(t * (spineKnots.length - 1));
+    const tt = t * (spineKnots.length - 1) - seg;
+    const p0 = spineKnots[Math.max(0, seg-1)];
+    const p1 = spineKnots[seg];
+    const p2 = spineKnots[Math.min(spineKnots.length-1, seg+1)];
+    const p3 = spineKnots[Math.min(spineKnots.length-1, seg+2)];
+    pts.push(catmullRom(p0, p1, p2, p3, tt));
+  }
+
+  // 4. Knee circle
+  const N_KNEE = 24;
+  for (let i = 0; i < N_KNEE; i++) {
+    const a = -Math.PI/2 + (TAU * i / N_KNEE);
+    pts.push([KNEE[0] + R_KNEE * Math.cos(a), KNEE[1] + R_KNEE * Math.sin(a)]);
+  }
+
+  // 5. Shin + foot (knee → foot)
+  const N_SHIN = 20;
+  for (let i = 1; i <= N_SHIN; i++) {
+    const t = i / N_SHIN;
+    pts.push([
+      KNEE[0] + (FOOT[0] - KNEE[0]) * t,
+      KNEE[1] + (FOOT[1] - KNEE[1]) * t + R_KNEE * 0.3 * Math.sin(Math.PI * t)
+    ]);
+  }
+
+  // 6. Ground line right → left (foot to just before hands)
+  const N_GROUND = 50;
+  const HAND = [-0.60, GY]; // hands/forearms on ground
+  for (let i = 1; i <= N_GROUND; i++) {
+    const t = i / N_GROUND;
+    pts.push([FOOT[0] + (HAND[0] - FOOT[0]) * t, GY]);
+  }
+
+  // 7. Hands + forearms raised slightly (arms flat on ground)
+  pts.push([-0.60, GY - 0.04]);
+  pts.push([-0.68, GY - 0.03]);
+  pts.push([-0.74, GY - 0.01]);
+  pts.push([-0.74, GY]);
+  pts.push([-0.65, GY]);
+
+  // Close back to head (ground → back of head)
+  const N_CLOSE = 20;
+  for (let i = 1; i <= N_CLOSE; i++) {
+    const t = i / N_CLOSE;
+    const hBack = [HEAD[0] - R_HEAD, HEAD[1]];
+    pts.push([
+      -0.65 + (hBack[0] - (-0.65)) * t,
+      GY + (hBack[1] - GY) * t
+    ]);
+  }
+
+  return pts;
+}
+
+// ── Resample to equidistant N points ─────────────────────────────────────────
+function resample(pts, N) {
+  const closed = [...pts, pts[0]];
+  const lens = [0];
+  for (let i = 1; i < closed.length; i++) {
+    const dx = closed[i][0]-closed[i-1][0], dy = closed[i][1]-closed[i-1][1];
+    lens.push(lens[i-1] + Math.sqrt(dx*dx+dy*dy));
+  }
+  const total = lens[lens.length-1];
+  const out = []; let j = 0;
+  for (let i = 0; i < N; i++) {
+    const tgt = i/N * total;
+    while (j < lens.length-1 && lens[j+1] < tgt) j++;
+    const t = (tgt-lens[j])/(lens[j+1]-lens[j]+1e-9);
+    const a = pts[Math.min(j, pts.length-1)], b = pts[Math.min(j+1, pts.length-1)];
+    out.push([a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t]);
+  }
+  return out;
+}
+
+// ── Complex FFT ───────────────────────────────────────────────────────────────
+function fft(pts) {
+  const N = pts.length;
+  const z = pts.map(p => [p[0], p[1]]); // [re, im]
+  // Simple DFT (N=256, fast enough)
+  const Z = [];
+  for (let k = 0; k < N; k++) {
+    let re = 0, im = 0;
+    for (let n = 0; n < N; n++) {
+      const phi = TAU * k * n / N;
+      re += z[n][0]*Math.cos(phi) - z[n][1]*Math.sin(phi);
+      im += z[n][0]*Math.sin(phi) + z[n][1]*Math.cos(phi);
+    }
+    const freq = k <= N/2 ? k : k-N;
+    Z.push({freq, amp: Math.sqrt(re*re+im*im)/N, phase: Math.atan2(im, re)});
+  }
+  Z.sort((a,b) => b.amp - a.amp);
+  return Z.slice(0, 80);
+}
+
+// Build the path
+const rawPath = buildPath();
+const sampled = resample(rawPath, 256);
+const FREQS = fft(sampled);
+
+// Canvas scale
+const xs = sampled.map(p=>p[0]), ys = sampled.map(p=>p[1]);
+const xspan = Math.max(...xs)-Math.min(...xs);
+const yspan = Math.max(...ys)-Math.min(...ys);
+const SC = 0.85 / Math.max(xspan, yspan);
+const OX = -(Math.max(...xs)+Math.min(...xs))/2;
+const OY = -(Math.max(...ys)+Math.min(...ys))/2;
+
+function toCanvas(nx, ny) {
+  return [S*0.5+(nx+OX)*SC*S, S*0.5+(ny+OY)*SC*S];
+}
+
+// ── Epicycle evaluation ───────────────────────────────────────────────────────
+function evalEpi(t) {
+  let x=0, y=0; const arms=[];
+  for (const f of FREQS) {
     const angle = f.freq*TAU*t + f.phase;
     const nx = x + f.amp*Math.cos(angle);
     const ny = y + f.amp*Math.sin(angle);
-    const [cx0,cy0]=toCanvas(x,y);
-    const [cx1,cy1]=toCanvas(nx,ny);
-    arms.push({x0:cx0,y0:cy0,x1:cx1,y1:cy1,r:f.amp*SC*S});
+    const [cx0,cy0]=toCanvas(x,y), [cx1,cy1]=toCanvas(nx,ny);
+    const r = f.amp*SC*S;
+    if (r > 2) arms.push({x0:cx0,y0:cy0,x1:cx1,y1:cy1,r});
     x=nx; y=ny;
   }
-  return {tip:toCanvas(x,y), arms};
+  return {tip: toCanvas(x,y), arms};
 }
 
-// Pre-trace the full shape path for the ghost outline
+// Pre-trace ghost
 const GHOST=[];
-const N_GHOST=600;
-for(let i=0;i<=N_GHOST;i++){
-  GHOST.push(evalEpi(i/N_GHOST).tip);
-}
+for (let i=0; i<=500; i++) GHOST.push(evalEpi(i/500).tip);
 
-// Trail: circular buffer
-const TRAIL_LEN = 420;
+// ── Animation ─────────────────────────────────────────────────────────────────
+const TRAIL_LEN = 480;
 const trailX = new Float32Array(TRAIL_LEN);
 const trailY = new Float32Array(TRAIL_LEN);
 let trailHead = 0, trailFull = false;
 
 let time = 0;
-const SPEED = 0.00028; // one full revolution in ~3570 frames ≈ ~60s
+const SPEED = 0.00030; // ~55s full revolution
 let lastTs = null;
 
-function tick(ts){
-  if(!lastTs) lastTs=ts;
+function tick(ts) {
+  if (!lastTs) lastTs=ts;
   const dt = Math.min((ts-lastTs)/1000, 0.05); lastTs=ts;
   time += SPEED * 60 * dt;
-  if(time>1) time-=1;
+  if (time > 1) time -= 1;
 
-  ctx.fillStyle='rgba(7,7,16,0.18)';
+  ctx.fillStyle='rgba(7,7,16,0.20)';
   ctx.fillRect(0,0,S,S);
 
   const {tip, arms} = evalEpi(time);
 
-  // Ghost outline — very dim, just the shape
+  // Ghost
   ctx.beginPath();
-  ctx.moveTo(GHOST[0][0],GHOST[0][1]);
-  for(let i=1;i<GHOST.length;i++) ctx.lineTo(GHOST[i][0],GHOST[i][1]);
+  ctx.moveTo(GHOST[0][0], GHOST[0][1]);
+  for (let i=1; i<GHOST.length; i++) ctx.lineTo(GHOST[i][0], GHOST[i][1]);
   ctx.closePath();
-  ctx.strokeStyle='rgba(100,140,220,0.06)';
-  ctx.lineWidth=1.0;
-  ctx.stroke();
+  ctx.strokeStyle='rgba(120,160,255,0.07)';
+  ctx.lineWidth=1.2; ctx.stroke();
 
-  // Arms — soft glow
-  for(const a of arms){
-    if(a.r < 2) continue;
-    // Circle
+  // Arms + circles
+  for (const a of arms) {
     ctx.beginPath(); ctx.arc(a.x0,a.y0,a.r,0,TAU);
-    ctx.strokeStyle=`rgba(80,120,200,${Math.min(0.12, 0.8/a.r)})`;
-    ctx.lineWidth=0.6; ctx.stroke();
-    // Arm line
-    ctx.beginPath(); ctx.moveTo(a.x0,a.y0); ctx.lineTo(a.x1,a.y1);
-    ctx.strokeStyle='rgba(120,170,255,0.22)';
+    ctx.strokeStyle=`rgba(70,110,200,${Math.min(0.14,1.2/a.r)})`;
     ctx.lineWidth=0.7; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(a.x0,a.y0); ctx.lineTo(a.x1,a.y1);
+    ctx.strokeStyle='rgba(110,160,255,0.24)';
+    ctx.lineWidth=0.8; ctx.stroke();
   }
 
   // Trail
@@ -152,46 +262,31 @@ function tick(ts){
 
   if(len>1){
     for(let i=1;i<len;i++){
-      const idx = trailFull ? (trailHead+i)%TRAIL_LEN : i;
-      const prev = trailFull ? (trailHead+i-1)%TRAIL_LEN : i-1;
-      const alpha = (i/len);
-      const bright = 0.3 + alpha*0.65;
-      const w = 0.8 + alpha*1.8;
+      const idx = trailFull?(trailHead+i)%TRAIL_LEN:i;
+      const prev = trailFull?(trailHead+i-1)%TRAIL_LEN:i-1;
+      const a = i/len;
       ctx.beginPath();
       ctx.moveTo(trailX[prev],trailY[prev]);
       ctx.lineTo(trailX[idx],trailY[idx]);
-      ctx.strokeStyle=`rgba(200,222,255,${bright})`;
-      ctx.lineWidth=w;
+      ctx.strokeStyle=`rgba(200,222,255,${0.15+a*0.82})`;
+      ctx.lineWidth=0.6+a*2.0;
       ctx.stroke();
     }
   }
 
-  // Tip dot
-  ctx.beginPath(); ctx.arc(tip[0],tip[1],3,0,TAU);
-  ctx.fillStyle='rgba(255,255,255,0.95)';
-  ctx.fill();
-  // Glow
-  const g=ctx.createRadialGradient(tip[0],tip[1],0,tip[0],tip[1],12);
-  g.addColorStop(0,'rgba(180,210,255,0.4)');
-  g.addColorStop(1,'rgba(180,210,255,0)');
-  ctx.beginPath(); ctx.arc(tip[0],tip[1],12,0,TAU);
+  // Tip
+  ctx.beginPath(); ctx.arc(tip[0],tip[1],3.5,0,TAU);
+  ctx.fillStyle='rgba(255,255,255,0.96)'; ctx.fill();
+  const g=ctx.createRadialGradient(tip[0],tip[1],0,tip[0],tip[1],14);
+  g.addColorStop(0,'rgba(160,200,255,0.5)');
+  g.addColorStop(1,'rgba(160,200,255,0)');
+  ctx.beginPath(); ctx.arc(tip[0],tip[1],14,0,TAU);
   ctx.fillStyle=g; ctx.fill();
 
   requestAnimationFrame(tick);
 }
 
-window.salah = {
-  pause(){},
-  forceComplete(){
-    ctx.fillStyle='#070710'; ctx.fillRect(0,0,S,S);
-    ctx.beginPath();
-    ctx.moveTo(GHOST[0][0],GHOST[0][1]);
-    for(let i=1;i<GHOST.length;i++) ctx.lineTo(GHOST[i][0],GHOST[i][1]);
-    ctx.closePath();
-    ctx.strokeStyle='rgba(210,228,255,0.92)'; ctx.lineWidth=1.8; ctx.stroke();
-  }
-};
-
+window.salah = { pause(){}, forceComplete(){} };
 requestAnimationFrame(tick);
 })();
 </script>
