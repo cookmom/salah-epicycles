@@ -79,8 +79,8 @@ const STEPS = [
   { type:'line', x1:()=>CX-R*1.8, y1:()=>CY+R, x2:()=>CX+R*1.8, y2:()=>CY+R, dur:800, color:'ground' },
   // 13: pause before reveal
   { type:'pause', dur:800 },
-  // 14: REVELATION — fade construction, reveal figure
-  { type:'reveal', dur:2000 },
+  // 14: REVELATION — fade construction, draw figure stroke by stroke
+  { type:'reveal', dur:4500 },
   // 15: hold + label
   { type:'label', dur:3500 },
   // 16: hold complete
@@ -154,105 +154,110 @@ function drawConstruction(alpha=1){
 //
 // Body: figure faces LEFT. Forehead left, knees right.
 
-function drawFigure(alpha){
-  if(alpha<=0) return;
+function drawFigure(progress){
+  // progress 0..1 — draw strokes sequentially, each stroke gets equal slice
+  if(progress<=0) return;
   ctx.save();
+  ctx.lineJoin='round'; ctx.lineCap='round';
 
-  const GY = CY + R;  // ground level
+  const GY = CY + R;  // ground
 
-  // Anchor points derived from construction
-  const hipX  = CX,          hipY  = CY;          // hip pivot = centre circle
-  const kneeX = CX + R*0.55, kneeY = GY;           // knee on ground (right)
-  const hcx   = CX - R*0.50, hcy   = CY + R*SQRT3/2; // head petal centre (240°)
-  const headR = R * 0.235;    // head radius ≈ R * sin(30°) * 0.9
+  // BODY LANDMARKS — head shifted further LEFT/forward into prostration position
+  const hipX   = CX,            hipY   = CY;
+  const kneeX  = CX + R*0.55,   kneeY  = GY;
+  const ankleX = CX + R*0.82,   ankleY = GY;
+  const toeX   = CX + R*1.06,   toeY   = GY;
 
-  // Derived body points
-  const shoulderX = hipX - R*0.55,  shoulderY = hipY - R*0.22;
-  const foreheadX  = hcx - headR*0.7, foreheadY = GY;
-  const handX      = hcx - headR*1.2, handY     = GY - headR*0.1;
-  const ankleX     = CX + R*0.85,    ankleY    = GY;
-  const toeX       = CX + R*1.10,    toeY      = GY;
+  // Head: pushed further left — forehead nearly at left edge of construction
+  const headCX = CX - R*0.82,   headCY = GY - R*0.22;
+  const headR  = R * 0.22;
 
-  const W = 1.5 * (S/720); // line weight scaled
-  const glow = `rgba(200,225,255,${alpha*0.35})`;
+  const shoulderX = hipX - R*0.52, shoulderY = hipY - R*0.20;
+  const apexX     = hipX - R*0.08, apexY     = hipY - R*0.52;
+  const neckX     = headCX + headR*0.6, neckY = headCY - headR*0.7;
+  const handX     = headCX - headR*0.5, handY = GY;
 
-  function stroke(color, lw){
-    ctx.strokeStyle = color;
-    ctx.lineWidth   = lw;
-    ctx.shadowBlur  = 6;
-    ctx.shadowColor = glow;
-    ctx.lineJoin    = 'round';
-    ctx.lineCap     = 'round';
+  const W = 1.5*(S/720);
+  const bright=`rgba(225,238,255,0.94)`, dim=`rgba(180,205,245,0.72)`;
+  const glow=`rgba(200,225,255,0.4)`;
+
+  // 8 strokes + dots = 9 stages, each gets 1/9 of progress
+  const N = 9;
+  function strokeStyle(c,lw){ ctx.strokeStyle=c; ctx.lineWidth=lw; ctx.shadowBlur=7; ctx.shadowColor=glow; }
+
+  // Helper: draw a partial path segment (t=0..1)
+  function partialLine(x1,y1,x2,y2,t){
+    ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x1+(x2-x1)*t, y1+(y2-y1)*t); ctx.stroke();
+  }
+  function partialArc(cx,cy,r,a0,a1,t,ccw){
+    const span=(a1-a0)*(ccw?-1:1);
+    ctx.beginPath(); ctx.arc(cx,cy,r,a0,a0+span*t,ccw); ctx.stroke();
+  }
+  function partialBezier(x1,y1,cpx,cpy,x2,y2,t){
+    // Draw bezier up to parameter t using de Casteljau
+    const steps=30; ctx.beginPath(); ctx.moveTo(x1,y1);
+    for(let i=1;i<=Math.ceil(steps*t);i++){
+      const s=Math.min(i/steps,t);
+      const bx=(1-s)*(1-s)*x1+2*(1-s)*s*cpx+s*s*x2;
+      const by=(1-s)*(1-s)*y1+2*(1-s)*s*cpy+s*s*y2;
+      ctx.lineTo(bx,by);
+    }
+    ctx.stroke();
   }
 
-  const bright = `rgba(225,238,255,${alpha*0.94})`;
-  const dim    = `rgba(180,205,245,${alpha*0.72})`;
+  // Stage fractions
+  function stageFrac(stage){ // returns 0..1 for how far through this stage
+    const start = stage/N, end = (stage+1)/N;
+    return Math.max(0, Math.min(1, (progress-start)/(end-start)));
+  }
 
-  // HEAD — circle
-  ctx.beginPath();
-  ctx.arc(hcx, hcy, headR, 0, TAU);
-  stroke(bright, W*1.15);
-  ctx.stroke();
+  // 0: HEAD circle
+  { const t=stageFrac(0);
+    if(t>0){ strokeStyle(bright,W*1.15); partialArc(headCX,headCY,headR,0,TAU,t,false); }}
 
-  // SPINE — from shoulder area, curving up to hip (the back arch)
-  // Use quadratic bezier: shoulder→apex→hip
-  const apexX = hipX - R*0.1, apexY = hipY - R*0.55;
-  ctx.beginPath();
-  ctx.moveTo(shoulderX, shoulderY);
-  ctx.quadraticCurveTo(apexX - R*0.1, apexY, hipX, hipY);
-  stroke(bright, W*1.2);
-  ctx.stroke();
+  // 1: NECK line head→shoulder
+  { const t=stageFrac(1);
+    if(t>0){ strokeStyle(dim,W); partialLine(neckX,neckY,shoulderX,shoulderY,t); }}
 
-  // NECK — from head top to shoulder
-  const neckTopX = hcx + headR*0.4,  neckTopY = hcy - headR*0.85;
-  ctx.beginPath();
-  ctx.moveTo(neckTopX, neckTopY);
-  ctx.lineTo(shoulderX, shoulderY);
-  stroke(dim, W);
-  ctx.stroke();
+  // 2: SPINE bezier shoulder→apex→hip
+  { const t=stageFrac(2);
+    if(t>0){ strokeStyle(bright,W*1.2); partialBezier(shoulderX,shoulderY,apexX-R*0.15,apexY,hipX,hipY,t); }}
 
-  // LEFT ARM — shoulder to hand (flat, forward)
-  ctx.beginPath();
-  ctx.moveTo(shoulderX, shoulderY + R*0.12);
-  ctx.quadraticCurveTo(shoulderX - R*0.3, GY - R*0.08, handX, handY);
-  stroke(dim, W*0.9);
-  ctx.stroke();
+  // 3: THIGH hip→knee
+  { const t=stageFrac(3);
+    if(t>0){ strokeStyle(bright,W*1.1); partialLine(hipX+R*0.06,hipY,kneeX,kneeY,t); }}
 
-  // THIGH — hip to knee (near vertical, slightly angled right)
-  ctx.beginPath();
-  ctx.moveTo(hipX + R*0.08, hipY);
-  ctx.lineTo(kneeX, kneeY);
-  stroke(bright, W*1.1);
-  ctx.stroke();
+  // 4: SHIN knee→ankle
+  { const t=stageFrac(4);
+    if(t>0){ strokeStyle(dim,W); partialLine(kneeX,kneeY,ankleX,ankleY,t); }}
 
-  // SHIN — knee to ankle (angles back)
-  ctx.beginPath();
-  ctx.moveTo(kneeX, kneeY);
-  ctx.lineTo(ankleX, ankleY);
-  stroke(dim, W);
-  ctx.stroke();
+  // 5: FOOT ankle→toe
+  { const t=stageFrac(5);
+    if(t>0){ strokeStyle(dim,W*0.85); partialLine(ankleX,ankleY,toeX,toeY,t); }}
 
-  // FOOT — ankle to toe (flat on ground)
-  ctx.beginPath();
-  ctx.moveTo(ankleX, ankleY);
-  ctx.lineTo(toeX, toeY);
-  stroke(dim, W*0.85);
-  ctx.stroke();
+  // 6: UPPER ARM shoulder→hand
+  { const t=stageFrac(6);
+    if(t>0){ strokeStyle(dim,W*0.9); partialBezier(shoulderX,shoulderY+R*0.1,shoulderX-R*0.28,GY-R*0.05,handX,handY,t); }}
 
-  // 7 CONTACT POINT DOTS — the sacred seven
-  const dotR2 = R*0.028;
-  ctx.fillStyle = `rgba(230,245,255,${alpha*0.88})`;
-  ctx.shadowBlur=10; ctx.shadowColor=`rgba(200,225,255,${alpha*0.7})`;
-  for(const [px,py] of [
-    [foreheadX, foreheadY],          // forehead
-    [handX - R*0.15, handY],         // left palm
-    [handX + R*0.12, handY],         // right palm
-    [kneeX - R*0.12, kneeY],         // left knee
-    [kneeX + R*0.12, kneeY],         // right knee
-    [toeX - R*0.08, toeY],           // left toes
-    [toeX + R*0.08, toeY],           // right toes
-  ]){
-    ctx.beginPath(); ctx.arc(px,py,dotR2,0,TAU); ctx.fill();
+  // 7: FOREARM → further forward (hand extends toward forehead)
+  { const t=stageFrac(7);
+    if(t>0){ strokeStyle(dim,W*0.8); partialLine(handX,handY,headCX-headR*1.1,GY,t); }}
+
+  // 8: 7 CONTACT DOTS appear
+  { const t=stageFrac(8);
+    if(t>0){
+      const dotR2=R*0.026*t;
+      ctx.fillStyle=`rgba(230,245,255,${0.88*t})`; ctx.shadowBlur=10; ctx.shadowColor=`rgba(200,225,255,${0.7*t})`;
+      for(const [px,py] of [
+        [headCX-headR*1.0, GY],       // forehead
+        [handX-R*0.12, GY],           // left palm
+        [handX+R*0.08, GY],           // right palm
+        [kneeX-R*0.10, GY],           // left knee
+        [kneeX+R*0.10, GY],           // right knee
+        [toeX-R*0.06, GY],            // left toes
+        [toeX+R*0.06, GY],            // right toes
+      ]){ ctx.beginPath(); ctx.arc(px,py,dotR2,0,TAU); ctx.fill(); }
+    }
   }
 
   ctx.restore();
@@ -407,10 +412,11 @@ function tick(ts){
     ctx.fill(); ctx.shadowBlur=0;
   }
 
-  // Figure reveal
+  // Figure reveal — draw strokes one by one
   if(stepIdx >= revealStep){
     if(step.type==='reveal'){
-      revealAlpha = easeInOut(progress);
+      // 7 strokes + dots: each gets 1/8 of the duration
+      revealAlpha = progress; // 0→1 drives which strokes are visible
     } else {
       revealAlpha = 1;
     }
