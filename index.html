@@ -105,9 +105,9 @@ function drawConstruction(alpha=1){
     if(a < 0.001) continue;
     ctx.save();
     if(d.type==='arc'){
-      const col = d.color==='head'   ? `rgba(160,200,255,${a*0.32})`
-                : d.color==='ground' ? `rgba(180,160,100,${a*0.28})`
-                :                      `rgba(190,155,80,${a*0.26})`;
+      const col = d.color==='head'   ? `rgba(215,228,255,${a*0.60})`
+                : d.color==='ground' ? `rgba(215,228,255,${a*0.55})`
+                :                      `rgba(215,228,255,${a*0.55})`;
       ctx.strokeStyle=col;
       ctx.lineWidth=0.8;
       ctx.beginPath();
@@ -115,8 +115,8 @@ function drawConstruction(alpha=1){
       else            ctx.arc(d.cx,d.cy,d.r,d.a0,d.a1,false);
       ctx.stroke();
     } else if(d.type==='line'){
-      const col = d.color==='ground' ? `rgba(180,160,100,${a*0.30})`
-                :                      `rgba(190,155,80,${a*0.26})`;
+      const col = d.color==='ground' ? `rgba(215,228,255,${a*0.55})`
+                :                      `rgba(215,228,255,${a*0.55})`;
       ctx.strokeStyle=col;
       ctx.lineWidth=0.8;
       ctx.beginPath();
@@ -124,7 +124,7 @@ function drawConstruction(alpha=1){
       ctx.lineTo(d.x2,d.y2);
       ctx.stroke();
     } else if(d.type==='hexagon'){
-      ctx.strokeStyle=`rgba(190,155,80,${a*0.22})`;
+      ctx.strokeStyle=`rgba(215,228,255,${a*0.42})`;
       ctx.lineWidth=0.7;
       ctx.beginPath();
       for(let i=0;i<6;i++){
@@ -169,13 +169,13 @@ function drawFigure(progress){
   const toeX   = CX + R*1.06,   toeY   = GY;
 
   // Head: further left/forward — forehead well past construction edge
-  const headCX = CX - R*1.00,   headCY = GY - R*0.20;
+  const headCX = CX - R*1.22,   headCY = GY - R*0.20;
   const headR  = R * 0.22;
 
   const shoulderX = hipX - R*0.52, shoulderY = hipY - R*0.20;
   const apexX     = hipX - R*0.08, apexY     = hipY - R*0.52;
   const neckX     = headCX + headR*0.6, neckY = headCY - headR*0.7;
-  const handX     = headCX - headR*0.8, handY = GY; // hands further forward
+  const handX     = headCX - headR*1.2, handY = GY; // hands further forward past head
 
   const W = 1.5*(S/720);
   const bright=`rgba(225,238,255,0.94)`, dim=`rgba(180,205,245,0.72)`;
@@ -322,8 +322,8 @@ function drawActiveArc(step, progress){
   const currentEnd = a0 + span*t;
 
   const col = step.color==='head'   ? `rgba(180,215,255,0.85)`
-            : step.color==='ground' ? `rgba(200,180,100,0.80)`
-            :                         `rgba(230,200,120,0.80)`;
+            : step.color==='ground' ? `rgba(215,228,255,0.75)`
+            :                         `rgba(215,228,255,0.85)`;
 
   ctx.save();
   ctx.strokeStyle=col;
@@ -346,7 +346,7 @@ function drawActiveLine(step, progress){
   const t = easeOut(progress);
   const x1=step.x1(), y1=step.y1(), x2=step.x2(), y2=step.y2();
   const ex=x1+(x2-x1)*t, ey=y1+(y2-y1)*t;
-  const col = step.color==='ground' ? `rgba(200,180,100,0.80)` : `rgba(230,200,120,0.80)`;
+  const col = step.color==='ground' ? `rgba(215,228,255,0.75)` : `rgba(215,228,255,0.85)`;
   ctx.save();
   ctx.strokeStyle=col; ctx.lineWidth=1.0;
   ctx.shadowBlur=5; ctx.shadowColor=col;
@@ -358,9 +358,9 @@ function drawActiveLine(step, progress){
 function drawActiveHexagon(progress){
   const t = easeInOut(progress);
   ctx.save();
-  ctx.strokeStyle=`rgba(190,160,90,0.75)`;
+  ctx.strokeStyle=`rgba(215,228,255,0.70)`;
   ctx.lineWidth=0.85;
-  ctx.shadowBlur=4; ctx.shadowColor=`rgba(190,160,90,0.5)`;
+  ctx.shadowBlur=4; ctx.shadowColor=`rgba(215,228,255,0.45)`;
   const total = 6;
   const drawn = t * total;
   ctx.beginPath();
@@ -400,9 +400,7 @@ function tick(ts){
   // Draw all completed construction
   const revealStep = STEPS.findIndex(s=>s.type==='reveal');
   const inReveal = stepIdx >= revealStep;
-  const constructionAlpha = inReveal
-    ? Math.max(0.28, 1 - easeInOut(Math.min(1,(stepIdx===revealStep)?progress*0.6:0.6)))
-    : 1;
+  const constructionAlpha = inReveal ? 0.45 : 1;
   drawConstruction(constructionAlpha);
 
   // Draw active step
