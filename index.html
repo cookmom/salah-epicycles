@@ -140,63 +140,120 @@ function drawConstruction(alpha=1){
   }
 }
 
-// ── Draw figure (sujud silhouette from construction) ──────────────────────────
-// The spine = upper arc of central circle (from ~200° to ~340° going CCW through top)
-// The head  = arc of lower-left petal circle
-// The ground = the tangent line at bottom of central circle
+// ── Draw figure (sujud) — joints anchored to construction geometry ─────────────
+// Ground at y = CY + R
+// The hexagonal grid's 6 outer points sit ON the ground or near it.
+// We anchor the body to these verified intersection points.
+//
+// Key anchors (all in canvas coords):
+//   Ground line:      y = CY + R
+//   Left petal centre (240°): CX - R*0.5, CY + R*√3/2   ← head circle centre
+//   Hip pivot:         CX, CY  (centre of construction)
+//   Right petal (0°): CX + R, CY   ← knee area
+//   Lower-right (300°): CX + R*0.5, CY + R*√3/2  ← knee on ground
+//
+// Body: figure faces LEFT. Forehead left, knees right.
+
 function drawFigure(alpha){
   if(alpha<=0) return;
   ctx.save();
-  ctx.lineWidth = 1.6;
-  ctx.lineJoin = 'round';
-  ctx.lineCap = 'round';
 
-  // Glow pass
-  ctx.shadowBlur = 8;
-  ctx.shadowColor = `rgba(200,225,255,${alpha*0.4})`;
+  const GY = CY + R;  // ground level
 
-  // SPINE ARC: central circle, upper portion
-  // From 210° to 330° going clockwise over the top (through 270° = straight up)
-  // In canvas coords (y-down): top = -π/2 = 270°
-  // Spine: right hip (lower-right) arching up over to shoulder (upper area)
-  // Using the arc from ~150° CCW to ~30° (going left over the top) = right-facing figure
-  const spineA0 = Math.PI * 1.1;  // ~198°
-  const spineA1 = Math.PI * 1.9;  // ~342°
-  ctx.strokeStyle = `rgba(220,235,255,${alpha*0.92})`;
+  // Anchor points derived from construction
+  const hipX  = CX,          hipY  = CY;          // hip pivot = centre circle
+  const kneeX = CX + R*0.55, kneeY = GY;           // knee on ground (right)
+  const hcx   = CX - R*0.50, hcy   = CY + R*SQRT3/2; // head petal centre (240°)
+  const headR = R * 0.235;    // head radius ≈ R * sin(30°) * 0.9
+
+  // Derived body points
+  const shoulderX = hipX - R*0.55,  shoulderY = hipY - R*0.22;
+  const foreheadX  = hcx - headR*0.7, foreheadY = GY;
+  const handX      = hcx - headR*1.2, handY     = GY - headR*0.1;
+  const ankleX     = CX + R*0.85,    ankleY    = GY;
+  const toeX       = CX + R*1.10,    toeY      = GY;
+
+  const W = 1.5 * (S/720); // line weight scaled
+  const glow = `rgba(200,225,255,${alpha*0.35})`;
+
+  function stroke(color, lw){
+    ctx.strokeStyle = color;
+    ctx.lineWidth   = lw;
+    ctx.shadowBlur  = 6;
+    ctx.shadowColor = glow;
+    ctx.lineJoin    = 'round';
+    ctx.lineCap     = 'round';
+  }
+
+  const bright = `rgba(225,238,255,${alpha*0.94})`;
+  const dim    = `rgba(180,205,245,${alpha*0.72})`;
+
+  // HEAD — circle
   ctx.beginPath();
-  ctx.arc(CX, CY, R, spineA0, spineA1, false);
+  ctx.arc(hcx, hcy, headR, 0, TAU);
+  stroke(bright, W*1.15);
   ctx.stroke();
 
-  // HEAD CIRCLE: lower-left petal, centred at 240°
-  const hcx = CX + R * Math.cos(Math.PI*4/3);
-  const hcy = CY + R * Math.sin(Math.PI*4/3);
-  const headR = R * 0.28; // head is smaller arc — use portion of petal circle
-  // Draw the visible arc of the head circle (the part above the ground line and facing right)
+  // SPINE — from shoulder area, curving up to hip (the back arch)
+  // Use quadratic bezier: shoulder→apex→hip
+  const apexX = hipX - R*0.1, apexY = hipY - R*0.55;
   ctx.beginPath();
-  ctx.arc(hcx, hcy, R, -Math.PI*0.15, Math.PI*0.55, false);
+  ctx.moveTo(shoulderX, shoulderY);
+  ctx.quadraticCurveTo(apexX - R*0.1, apexY, hipX, hipY);
+  stroke(bright, W*1.2);
   ctx.stroke();
 
-  // ARM LINE: from spine (upper-left area) extending further left toward forehead
-  const armSx = CX + R*Math.cos(Math.PI*1.35);
-  const armSy = CY + R*Math.sin(Math.PI*1.35);
-  const armEx = CX + R*1.1*Math.cos(Math.PI*1.6);
-  const armEy = CY + R*1.1*Math.sin(Math.PI*1.6);
-  ctx.strokeStyle = `rgba(200,220,255,${alpha*0.70})`;
-  ctx.lineWidth=1.2;
+  // NECK — from head top to shoulder
+  const neckTopX = hcx + headR*0.4,  neckTopY = hcy - headR*0.85;
   ctx.beginPath();
-  ctx.moveTo(armSx,armSy);
-  ctx.lineTo(armEx,armEy);
+  ctx.moveTo(neckTopX, neckTopY);
+  ctx.lineTo(shoulderX, shoulderY);
+  stroke(dim, W);
   ctx.stroke();
 
-  // GROUND contact dots (forehead, 2 knees)
-  const dotR = R*0.025;
-  ctx.fillStyle=`rgba(220,235,255,${alpha*0.85})`;
-  // Forehead: where lower-left petal meets ground (y = CY+R)
-  const foreheadX = CX + R*Math.cos(Math.PI*4/3) + R*Math.cos(Math.PI*0.2);
-  ctx.beginPath(); ctx.arc(foreheadX, CY+R, dotR*1.5, 0, TAU); ctx.fill();
-  // Right knee region
-  ctx.beginPath(); ctx.arc(CX+R*0.85, CY+R, dotR*1.2, 0, TAU); ctx.fill();
-  ctx.beginPath(); ctx.arc(CX+R*0.55, CY+R, dotR*1.0, 0, TAU); ctx.fill();
+  // LEFT ARM — shoulder to hand (flat, forward)
+  ctx.beginPath();
+  ctx.moveTo(shoulderX, shoulderY + R*0.12);
+  ctx.quadraticCurveTo(shoulderX - R*0.3, GY - R*0.08, handX, handY);
+  stroke(dim, W*0.9);
+  ctx.stroke();
+
+  // THIGH — hip to knee (near vertical, slightly angled right)
+  ctx.beginPath();
+  ctx.moveTo(hipX + R*0.08, hipY);
+  ctx.lineTo(kneeX, kneeY);
+  stroke(bright, W*1.1);
+  ctx.stroke();
+
+  // SHIN — knee to ankle (angles back)
+  ctx.beginPath();
+  ctx.moveTo(kneeX, kneeY);
+  ctx.lineTo(ankleX, ankleY);
+  stroke(dim, W);
+  ctx.stroke();
+
+  // FOOT — ankle to toe (flat on ground)
+  ctx.beginPath();
+  ctx.moveTo(ankleX, ankleY);
+  ctx.lineTo(toeX, toeY);
+  stroke(dim, W*0.85);
+  ctx.stroke();
+
+  // 7 CONTACT POINT DOTS — the sacred seven
+  const dotR2 = R*0.028;
+  ctx.fillStyle = `rgba(230,245,255,${alpha*0.88})`;
+  ctx.shadowBlur=10; ctx.shadowColor=`rgba(200,225,255,${alpha*0.7})`;
+  for(const [px,py] of [
+    [foreheadX, foreheadY],          // forehead
+    [handX - R*0.15, handY],         // left palm
+    [handX + R*0.12, handY],         // right palm
+    [kneeX - R*0.12, kneeY],         // left knee
+    [kneeX + R*0.12, kneeY],         // right knee
+    [toeX - R*0.08, toeY],           // left toes
+    [toeX + R*0.08, toeY],           // right toes
+  ]){
+    ctx.beginPath(); ctx.arc(px,py,dotR2,0,TAU); ctx.fill();
+  }
 
   ctx.restore();
 }
