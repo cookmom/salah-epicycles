@@ -168,14 +168,14 @@ function drawFigure(progress){
   const ankleX = CX + R*0.82,   ankleY = GY;
   const toeX   = CX + R*1.06,   toeY   = GY;
 
-  // Head: pushed further left — forehead nearly at left edge of construction
-  const headCX = CX - R*0.82,   headCY = GY - R*0.22;
+  // Head: further left/forward — forehead well past construction edge
+  const headCX = CX - R*1.00,   headCY = GY - R*0.20;
   const headR  = R * 0.22;
 
   const shoulderX = hipX - R*0.52, shoulderY = hipY - R*0.20;
   const apexX     = hipX - R*0.08, apexY     = hipY - R*0.52;
   const neckX     = headCX + headR*0.6, neckY = headCY - headR*0.7;
-  const handX     = headCX - headR*0.5, handY = GY;
+  const handX     = headCX - headR*0.8, handY = GY; // hands further forward
 
   const W = 1.5*(S/720);
   const bright=`rgba(225,238,255,0.94)`, dim=`rgba(180,205,245,0.72)`;
@@ -185,24 +185,32 @@ function drawFigure(progress){
   const N = 9;
   function strokeStyle(c,lw){ ctx.strokeStyle=c; ctx.lineWidth=lw; ctx.shadowBlur=7; ctx.shadowColor=glow; }
 
-  // Helper: draw a partial path segment (t=0..1)
+  // Helper: draw a partial path segment (t=0..1) + show compass tip at end
   function partialLine(x1,y1,x2,y2,t){
-    ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x1+(x2-x1)*t, y1+(y2-y1)*t); ctx.stroke();
+    const ex=x1+(x2-x1)*t, ey=y1+(y2-y1)*t;
+    ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(ex,ey); ctx.stroke();
+    if(t<1) drawCompass(x1,y1,ex,ey,0.75);
   }
   function partialArc(cx,cy,r,a0,a1,t,ccw){
     const span=(a1-a0)*(ccw?-1:1);
-    ctx.beginPath(); ctx.arc(cx,cy,r,a0,a0+span*t,ccw); ctx.stroke();
+    const endA=a0+span*t;
+    ctx.beginPath(); ctx.arc(cx,cy,r,a0,endA,ccw); ctx.stroke();
+    if(t<1){
+      const tx=cx+r*Math.cos(endA), ty=cy+r*Math.sin(endA);
+      drawCompass(cx,cy,tx,ty,0.75);
+    }
   }
   function partialBezier(x1,y1,cpx,cpy,x2,y2,t){
-    // Draw bezier up to parameter t using de Casteljau
     const steps=30; ctx.beginPath(); ctx.moveTo(x1,y1);
+    let ex=x1,ey=y1;
     for(let i=1;i<=Math.ceil(steps*t);i++){
       const s=Math.min(i/steps,t);
-      const bx=(1-s)*(1-s)*x1+2*(1-s)*s*cpx+s*s*x2;
-      const by=(1-s)*(1-s)*y1+2*(1-s)*s*cpy+s*s*y2;
-      ctx.lineTo(bx,by);
+      ex=(1-s)*(1-s)*x1+2*(1-s)*s*cpx+s*s*x2;
+      ey=(1-s)*(1-s)*y1+2*(1-s)*s*cpy+s*s*y2;
+      ctx.lineTo(ex,ey);
     }
     ctx.stroke();
+    if(t<1) drawCompass(x1,y1,ex,ey,0.75);
   }
 
   // Stage fractions
@@ -393,7 +401,7 @@ function tick(ts){
   const revealStep = STEPS.findIndex(s=>s.type==='reveal');
   const inReveal = stepIdx >= revealStep;
   const constructionAlpha = inReveal
-    ? Math.max(0.05, 1 - easeInOut(Math.min(1,(stepIdx===revealStep)?progress:1)))
+    ? Math.max(0.28, 1 - easeInOut(Math.min(1,(stepIdx===revealStep)?progress*0.6:0.6)))
     : 1;
   drawConstruction(constructionAlpha);
 
