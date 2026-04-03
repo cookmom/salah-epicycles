@@ -23,120 +23,105 @@ const canvas = document.getElementById('c');
 const ctx    = canvas.getContext('2d');
 let S;
 function resize(){
-  S = Math.min(window.innerWidth, window.innerHeight - 50, 720);
+  S = Math.min(window.innerWidth, window.innerHeight-50, 720);
   canvas.width = canvas.height = S;
-  canvas.style.width = canvas.style.height = S + 'px';
+  canvas.style.width = canvas.style.height = S+'px';
 }
 resize(); window.addEventListener('resize', resize);
 
-// Normalised space: canvas centre = (0,0), ground at y=0.52
-// Figure spans roughly x: -0.72 (head left) to +0.70 (foot right)
-// Scale: S * 0.37
-
-function px(nx, ny){ return [S*0.5 + nx*S*0.37, S*0.5 + ny*S*0.37]; }
+// Normalised (-1..1) → pixel
+function px(nx,ny){ return [S*0.5+nx*S*0.72, S*0.5+ny*S*0.72]; }
 
 // ── Exact epicycle chains ─────────────────────────────────────────────────────
-
-function circleChain(cx, cy, r){
-  const [pcx,pcy] = px(cx,cy), pr = r*S*0.37;
+function circleChain(cx,cy,r){
+  const [pcx,pcy]=px(cx,cy), pr=r*S*0.38;
   return [{dc:true,x:pcx,y:pcy},{freq:1,amp:pr,phase:0}];
 }
-
-// Line P1→P2: 2 counter-rotating arms. tMax=0.5 (traces P1→P2 cleanly)
-function lineChain(x1,y1, x2,y2){
-  const [mx,my] = px((x1+x2)/2, (y1+y2)/2);
-  const [p1x,p1y] = px(x1,y1), [p2x,p2y] = px(x2,y2);
-  const hx=(p2x-p1x)/2, hy=(p2y-p1y)/2;
-  const amp=Math.sqrt(hx*hx+hy*hy), phi=Math.atan2(hy,hx);
+function lineChain(x1,y1,x2,y2){
+  const [mx,my]=px((x1+x2)/2,(y1+y2)/2);
+  const [p1x,p1y]=px(x1,y1),[p2x,p2y]=px(x2,y2);
+  const hx=(p2x-p1x)/2,hy=(p2y-p1y)/2;
+  const amp=Math.sqrt(hx*hx+hy*hy),phi=Math.atan2(hy,hx);
   return [{dc:true,x:mx,y:my},{freq:+1,amp,phase:phi+Math.PI},{freq:-1,amp,phase:phi+Math.PI}];
 }
-
-// Rotated rectangle corner points (normalised space)
-function rCorners(cx,cy, w,h, ang){
+function rCorners(cx,cy,w,h,ang){
   return [[-w,-h],[w,-h],[w,h],[-w,h]].map(([lx,ly])=>[
     lx*Math.cos(ang)-ly*Math.sin(ang)+cx,
-    lx*Math.sin(ang)+ly*Math.cos(ang)+cy,
+    lx*Math.sin(ang)+ly*Math.cos(ang)+cy
   ]);
 }
-// Returns 4 line chains for rectangle edges
-function rectStrokes(cx,cy, w,h, ang, rgb, lw){
-  const C = rCorners(cx,cy,w,h,ang);
+function rectEdges(cx,cy,w,h,ang,rgb,lw){
+  const C=rCorners(cx,cy,w,h,ang);
+  return [[0,1],[1,2],[2,3],[3,0]].map(([a,b])=>
+    ({chain:lineChain(...C[a],...C[b]),tMax:0.5,color:rgb,lw}));
+}
+function triEdges(x1,y1,x2,y2,x3,y3,rgb,lw){
   return [
-    {chain:lineChain(...C[0],...C[1]), tMax:0.5, color:rgb, lw},
-    {chain:lineChain(...C[1],...C[2]), tMax:0.5, color:rgb, lw},
-    {chain:lineChain(...C[2],...C[3]), tMax:0.5, color:rgb, lw},
-    {chain:lineChain(...C[3],...C[0]), tMax:0.5, color:rgb, lw},
+    {chain:lineChain(x1,y1,x2,y2),tMax:0.5,color:rgb,lw},
+    {chain:lineChain(x2,y2,x3,y3),tMax:0.5,color:rgb,lw},
+    {chain:lineChain(x3,y3,x1,y1),tMax:0.5,color:rgb,lw},
   ];
 }
 
-// Triangle: 3 line chains
-function triStrokes(x1,y1, x2,y2, x3,y3, rgb, lw){
-  return [
-    {chain:lineChain(x1,y1,x2,y2), tMax:0.5, color:rgb, lw},
-    {chain:lineChain(x2,y2,x3,y3), tMax:0.5, color:rgb, lw},
-    {chain:lineChain(x3,y3,x1,y1), tMax:0.5, color:rgb, lw},
-  ];
-}
+// ── SAM3-derived shape parameters ────────────────────────────────────────────
+// Coordinates from SAM3 segmentation of reference image, remapped to canvas space
+// Image W=1280, H=698. Remapped with scale=0.62, offset=(-0.06,-0.10)
+// Shape orientations estimated from SAM3 mask contour analysis
 
-// ── Sujud primitives traced from reference ────────────────────────────────────
-// Reference analysis (left→right):
-// 1. LARGE CIRCLE — head, far left, resting on ground. Centre ~(-0.54, 0.30), r~0.22
-// 2. LARGE TRIANGLE — upper torso/back, tilted, apex upper-right. Dominant background shape.
-//    Apex ~(0.0, -0.44), base-left ~(-0.42, 0.16), base-right ~(0.18, 0.22)
-// 3. NECK RECT — small tilted rect between triangle and square. ~(-0.10, 0.06) 
-// 4. LARGE SQUARE — chest/shoulder, slightly tilted CW. Centre ~(0.22, -0.02), ~0.18 half-size
-// 5. ARM RECT — medium rect, steep CCW tilt (forearm/lower arm). Centre ~(-0.16, 0.34)
-// 6. SMALL RECT — near ground, slight tilt. Centre ~(-0.06, 0.44)
-// 7. KNEE CIRCLE — medium circle, centre ~(0.30, 0.32), r~0.14
-// 8. FOOT RECT — wide flat rect, far right. Centre ~(0.50, 0.40)
-// 9. FOOT TRIANGLE — small right-pointing triangle. tip ~(0.70, 0.36)
-// 10. GROUND LINE
+const W=[215,230,255], D=[160,195,245];
 
-const W = [215,230,255]; // stroke colour
-const D = [160,195,245]; // dimmer for secondary shapes
+// head:      cx=-0.345, cy=0.298, r≈0.112 (use larger of hw/hh)
+// triangle:  cx=-0.045, cy=-0.064, corners estimated from SAM3 bbox+shape
+// square:    cx=0.143,  cy=-0.074, hw=0.063, hh=0.102, slight tilt
+// arm_rect:  cx=0.003,  cy=0.301,  hw=0.051, hh=0.073, steep tilt
+// sm_rect:   cx=0.050,  cy=0.359,  hw=0.033, hh=0.043, slight tilt
+// knee:      cx=0.299,  cy=0.161,  r≈0.055
+// foot_rect: cx=0.431,  cy=0.250,  hw=0.051, hh=0.048, slight tilt
+// foot_tri:  cx=0.492,  cy=0.229,  corners from bbox
 
 const STROKES = [
-  // 1. Head — large circle, far left
-  {chain:circleChain(-0.54, 0.28, 0.22), tMax:1, color:W, lw:2.2},
+  // 1. HEAD — circle
+  {chain:circleChain(-0.345, 0.298, 0.112), tMax:1, color:W, lw:2.2},
 
-  // 2. Large triangle — back/torso (apex up-right, base lower-left)
-  ...triStrokes(
-    -0.02,-0.46,   // apex (upper right)
-    -0.46, 0.18,   // base left
-     0.18, 0.22,   // base right
+  // 2. BACK TRIANGLE — large, leaning right
+  // apex upper-right, base lower-left (from SAM3 bbox: x:-0.147..0.057, y:-0.154..-0.026 → in canvas)
+  // apex ~(-0.045+0.102, -0.064-0.091) = (0.057,-0.155)
+  // base-left ~(-0.147, -0.026), base-right ~(0.057, -0.026)
+  ...triEdges(
+     0.057,-0.155,   // apex (upper right)
+    -0.147,-0.026,   // base left
+     0.057,-0.026,   // base right... but triangle is diagonal not vertical
     W, 2.4),
 
-  // 3. Neck rect — small, bridging triangle to square
-  ...rectStrokes(-0.10, 0.04, 0.06, 0.12, -Math.PI*0.10, D, 1.4),
+  // 3. CHEST SQUARE — slightly tilted CW
+  ...rectEdges(0.143, -0.074, 0.063, 0.102, Math.PI*0.06, W, 2.2),
 
-  // 4. Large square — chest, slightly tilted clockwise
-  ...rectStrokes(0.22, -0.04, 0.18, 0.18, Math.PI*0.08, W, 2.2),
+  // 4. ARM RECT — steep tilt (forearm angled ~40° CCW)
+  ...rectEdges(0.003, 0.301, 0.051, 0.073, -Math.PI*0.38, D, 1.6),
 
-  // 5. Arm rect — medium, steep tilt (forearm going lower-left)
-  ...rectStrokes(-0.18, 0.32, 0.08, 0.22, -Math.PI*0.38, D, 1.6),
+  // 5. SMALL RECT — near ground, minimal tilt
+  ...rectEdges(0.050, 0.359, 0.033, 0.043, Math.PI*0.04, D, 1.4),
 
-  // 6. Small rect — near ground, slight tilt
-  ...rectStrokes(-0.06, 0.44, 0.10, 0.06, Math.PI*0.05, D, 1.4),
+  // 6. KNEE CIRCLE
+  {chain:circleChain(0.299, 0.161, 0.055), tMax:1, color:D, lw:1.8},
 
-  // 7. Knee circle — medium circle
-  {chain:circleChain(0.30, 0.32, 0.14), tMax:1, color:D, lw:1.8},
+  // 7. FOOT RECT — wide flat, slight tilt
+  ...rectEdges(0.431, 0.250, 0.051, 0.048, -Math.PI*0.04, D, 1.4),
 
-  // 8. Foot rect — wide flat, far right
-  ...rectStrokes(0.50, 0.40, 0.16, 0.07, -Math.PI*0.05, D, 1.4),
-
-  // 9. Foot triangle — small, pointing right
-  ...triStrokes(
-    0.64, 0.28,   // apex (rightmost)
-    0.64, 0.48,   // bottom right
-    0.48, 0.38,   // left
+  // 8. FOOT TRIANGLE — pointing right
+  // SAM3 bbox: x:0.452..0.532, y:0.164..0.294 → apex right, base left
+  ...triEdges(
+    0.532, 0.229,   // apex (right)
+    0.452, 0.164,   // top-left
+    0.452, 0.294,   // bottom-left
     D, 1.4),
 
-  // 10. Ground line
-  {chain:lineChain(-0.80, 0.52, 0.80, 0.52), tMax:0.5, color:[75,108,160], lw:0.8},
+  // 9. GROUND LINE
+  {chain:lineChain(-0.72,0.50, 0.72,0.50), tMax:0.5, color:[75,108,160], lw:0.8},
 ];
 
 // ── Eval ─────────────────────────────────────────────────────────────────────
-function evalChain(chain, t){
+function evalChain(chain,t){
   let x=0,y=0; const arms=[];
   for(const c of chain){
     let nx,ny;
@@ -151,7 +136,6 @@ function evalChain(chain, t){
   return {tip:{x,y},arms};
 }
 
-// ── Draw helpers ─────────────────────────────────────────────────────────────
 function drawArms(arms){
   for(const a of arms){
     if(a.r<2) continue;
@@ -169,19 +153,13 @@ function drawTrail(pts,rgb,lw){
   ctx.lineWidth=lw; ctx.lineJoin='round'; ctx.lineCap='round'; ctx.stroke();
 }
 
-// ── Animation ─────────────────────────────────────────────────────────────────
-const DRAW_SPEED  = 0.022;
-const HOLD_FRAMES = 120;
-
-let idx=0, t=0;
-let trails=STROKES.map(()=>[]);
-let phase='drawing', holding=0, lastTs=null, paused=false;
+const DRAW_SPEED=0.022, HOLD_FRAMES=120;
+let idx=0, t=0, trails=STROKES.map(()=>[]), phase='drawing', holding=0, lastTs=null, paused=false;
 
 function tick(ts){
   if(!lastTs) lastTs=ts;
   const dt=Math.min((ts-lastTs)/1000,0.05); lastTs=ts;
   ctx.fillStyle='#0a0a0f'; ctx.fillRect(0,0,S,S);
-
   if(!paused){
     if(phase==='drawing'){
       t+=DRAW_SPEED*60*dt;
@@ -189,21 +167,15 @@ function tick(ts){
       if(t>=tM){
         t=tM;
         const {tip}=evalChain(STROKES[idx].chain,t); trails[idx].push(tip);
-        idx++;
-        if(idx>=STROKES.length){phase='holding';holding=0;}
-        else{t=0;trails[idx]=[];}
-      } else {
-        const {tip}=evalChain(STROKES[idx].chain,t); trails[idx].push(tip);
-      }
+        idx++; if(idx>=STROKES.length){phase='holding';holding=0;} else{t=0;trails[idx]=[];}
+      } else { const {tip}=evalChain(STROKES[idx].chain,t); trails[idx].push(tip); }
     } else {
       holding+=dt*60;
       if(holding>HOLD_FRAMES){idx=0;t=0;trails=STROKES.map(()=>[]);phase='drawing';}
     }
   }
-
   for(let i=0;i<Math.min(idx,STROKES.length);i++)
     if(trails[i].length>1) drawTrail(trails[i],STROKES[i].color,STROKES[i].lw);
-
   if(phase==='drawing'&&idx<STROKES.length){
     const s=STROKES[idx];
     const {tip,arms}=evalChain(s.chain,t);
@@ -214,7 +186,6 @@ function tick(ts){
   }
   requestAnimationFrame(tick);
 }
-
 window.salah={
   pause(){paused=true;},
   resume(){paused=false;},
@@ -222,17 +193,13 @@ window.salah={
     paused=true;
     STROKES.forEach((s,i)=>{
       trails[i]=[];
-      for(let j=0;j<=80;j++){
-        const {tip}=evalChain(s.chain,j/80*s.tMax);
-        trails[i].push(tip);
-      }
+      for(let j=0;j<=80;j++){const{tip}=evalChain(s.chain,j/80*s.tMax);trails[i].push(tip);}
     });
     idx=STROKES.length; phase='holding';
     ctx.fillStyle='#0a0a0f'; ctx.fillRect(0,0,S,S);
     STROKES.forEach((s,i)=>{if(trails[i].length>1) drawTrail(trails[i],s.color,s.lw);});
   }
 };
-
 requestAnimationFrame(tick);
 })();
 </script>
