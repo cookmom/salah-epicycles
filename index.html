@@ -169,13 +169,13 @@ function drawFigure(progress){
   const toeX   = CX + R*1.06,   toeY   = GY;
 
   // Head: further left/forward — forehead well past construction edge
-  const headCX = CX - R*1.22,   headCY = GY - R*0.20;
+  const headCX = CX - R*1.45,   headCY = GY - R*0.18;
   const headR  = R * 0.22;
 
   const shoulderX = hipX - R*0.52, shoulderY = hipY - R*0.20;
   const apexX     = hipX - R*0.08, apexY     = hipY - R*0.52;
   const neckX     = headCX + headR*0.6, neckY = headCY - headR*0.7;
-  const handX     = headCX - headR*1.2, handY = GY; // hands further forward past head
+  const handX     = headCX - headR*1.6, handY = GY; // hands well past head
 
   const W = 1.5*(S/720);
   const bright=`rgba(225,238,255,0.94)`, dim=`rgba(180,205,245,0.72)`;
