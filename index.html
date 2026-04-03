@@ -402,11 +402,23 @@ function tick(ts){
 
   // Draw active step — arcs: show ONLY compass sweep, arc appears when complete
   if(step.type==='arc' && progress<1){
-    // Just show compass sweeping — no partial arc drawn
+    // Arc grows as compass sweeps — both visible simultaneously
     const a0=step.a0, a1=step.a1;
     const cx=step.cx(), cy=step.cy(), r=step.r();
     const span=(step.dir===-1)?-(((a0-a1)+TAU)%TAU):((a1-a0+TAU)%TAU);
-    const currentAngle=a0+span*easeInOut(progress);
+    const t=easeInOut(progress);
+    const currentAngle=a0+span*t;
+    // Draw the arc so far
+    const col=`rgba(215,228,255,0.82)`;
+    ctx.save();
+    ctx.strokeStyle=col; ctx.lineWidth=0.9;
+    ctx.shadowBlur=5; ctx.shadowColor=col;
+    ctx.beginPath();
+    if(step.dir===-1) ctx.arc(cx,cy,r,currentAngle,a0,true);
+    else               ctx.arc(cx,cy,r,a0,currentAngle,false);
+    ctx.stroke();
+    ctx.restore();
+    // Compass tip at leading edge
     const tipX=cx+r*Math.cos(currentAngle), tipY=cy+r*Math.sin(currentAngle);
     drawCompass(cx,cy,tipX,tipY,0.85);
   } else if(step.type==='line' && progress<1){
