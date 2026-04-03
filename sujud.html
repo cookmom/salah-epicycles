@@ -30,21 +30,20 @@ function resize(){
 resize(); window.addEventListener('resize', resize);
 
 // ── Coordinate system ─────────────────────────────────────────────────────────
-// Source coords: normalised to image width, centre = (0,0)
-// Image is 1280×698. y coords use IW as scale (square pixels from centre).
-// All shape values derived from cv2.minAreaRect on actual pixel data.
+// Source: pixel coords from 1280×698 image, normalised as:
+//   nx = (px - 640) / 640
+//   ny = (py - 349) / 640  (width used for both axes — square pixels from centre)
 //
-// Canvas scale: multiply norm coords by S * SC, offset by (S*OX, S*OY)
-// Chosen to fit figure with margin: figure spans x:-0.684..0.862, y:-0.268..0.544
-// Centre of figure: x_mid=0.089, y_mid=0.138. Scale to fill ~88% of canvas.
-const SC = 0.88 / 1.546;  // 1.546 = total width span
-const OX = -0.089 * SC;   // centre figure in canvas
-const OY = -0.138 * SC;
+// Figure bounds: x[-0.800..0.878], y[-0.239..0.436]
+// Scale to fit canvas with 85% fill: SC = 0.85 / 1.678 ≈ 0.507
+// Centre offset: OX=0.039, OY=0.099
+const SC = 0.82;
+const OX = 0.039, OY = 0.099;
 
 function px(nx, ny){
-  return [S*0.5 + (nx*SC + OX)*S*0.5, S*0.5 + (ny*SC + OY)*S*0.5];
+  return [S*0.5 + (nx-OX)*SC*S*0.5, S*0.5 + (ny-OY)*SC*S*0.5];
 }
-function pxS(n){ return n * SC * S * 0.5; } // scale only (for radii/sizes)
+function pxS(n){ return n * SC * S * 0.5; }
 
 // ── Exact epicycle chains ─────────────────────────────────────────────────────
 function circleChain(cx,cy,r){
@@ -73,88 +72,71 @@ function triEdges(pts,rgb,lw){
   return [[0,1],[1,2],[2,0]].map(([a,b])=>
     ({chain:lineChain(...pts[a],...pts[b]),tMax:0.5,color:rgb,lw}));
 }
-function approxTriPts(cx,cy,hw,hh,ang){
-  // From minAreaRect: approximate triangle as right-pointing shape
-  // apex = centre + half the long axis, base = two points at -half long axis
-  const lx=hw*Math.cos(ang), ly=hw*Math.sin(ang);
-  const wx=hh*Math.cos(ang+Math.PI/2), wy=hh*Math.sin(ang+Math.PI/2);
-  return [
-    [cx+lx,   cy+ly],           // apex
-    [cx-lx+wx, cy-ly+wy],       // base top
-    [cx-lx-wx, cy-ly-wy],       // base bottom
-  ];
-}
 
-// ── Shape data from cv2.minAreaRect on actual reference pixel data ─────────────
-// All values: cx,cy in normalised coords (÷ IW/2 from image centre)
-//             hw,hh = half-width, half-height in same units
-//             angle in radians (from cv2 degrees, converted)
-const DEG = Math.PI / 180;
-const W=[215,230,255], D=[160,195,245];
+// ── Normalise pixel coords ────────────────────────────────────────────────────
+function n(px){ return (px-640)/640; }
+function ny(py){ return (py-349)/640; }
 
-// Ground line (detected separately)
-const GROUND_Y = 0.544;
+const DEG = Math.PI/180;
+const W=[215,230,255], D=[160,195,245], DIM=[100,130,180];
+
+// ── Strokes — drawn back to front, each by epicycle chains ───────────────────
+// All data from Claude Code analysis of reference image (1280×698px)
 
 const STROKES = [
-  // HEAD — large circle, far left
-  // cv2 minEnclosingCircle: cx=202.5, cy=495.0, r=164.4 on 1280×698 image
-  // norm: cx=-0.684, cy=-0.227 (using IW/2=640 as scale for both axes... but cy uses IH)
-  // Actual pixel cy=495 → (495-698/2)/(1280/2) = 146/640 = 0.228
-  {chain:circleChain(-0.684, 0.228, 0.257), tMax:1, color:W, lw:2.2},
+  // 1. GROUND LINE  y=628, x:128→1202
+  {chain:lineChain(n(128),ny(628), n(1202),ny(628)), tMax:0.5, color:DIM, lw:0.8},
 
-  // LARGE BODY SHAPE — [0] classified as triangle, but it's the big torso shape
-  // area=77139, cx=-0.001, cy=0.211, w=0.400, h=1.730, ang=-90°
-  // It's actually a large irregular quad — use its minAreaRect as a tall rect
-  ...rectEdges(-0.001, 0.211, 0.200, 0.865, -90*DEG, W, 2.4),
+  // 2. HIP CIRCLE  center(233,490) r=132
+  {chain:circleChain(n(233),ny(490), 132/640), tMax:1, color:W, lw:2.2},
 
-  // BIG TILTED RECT — [1] the main back rectangle
-  // area=70337, cx=-0.073, cy=-0.114, w=0.729, h=0.326, ang=-24.5°
-  ...rectEdges(-0.073, -0.114, 0.364, 0.163, -24.5*DEG, W, 2.2),
+  // 3. TORSO RECT  center(555,235) 480×285 -5°
+  ...rectEdges(n(555),ny(235), 240/640,142/640, -5*DEG, W, 2.4),
 
-  // CIRCLE — [2] knee/mid circle
-  // area=29913, cx=0.264, cy=0.014, w=0.317, h=0.231 → r≈0.137
-  {chain:circleChain(0.264, 0.014, 0.137), tMax:1, color:D, lw:1.8},
+  // 4. THIGH STRIP  center(358,458) 68×110 -72°
+  ...rectEdges(n(358),ny(458), 34/640,55/640, -72*DEG, D, 1.4),
 
-  // FOOT RECT — [3] wide rect far right
-  // area=20943, cx=0.487, cy=0.259, w=0.333, h=0.154, ang=-10.7°
-  ...rectEdges(0.487, 0.259, 0.167, 0.077, -10.7*DEG, D, 1.4),
+  // 5. NECK RECT  center(838,302) 128×230 +10°
+  ...rectEdges(n(838),ny(302), 64/640,115/640, +10*DEG, W, 2.0),
 
-  // UPPER CIRCLE — [4] chest/shoulder circle (upper right area)
-  // area=19385, cx=0.340, cy=-0.268, r≈0.122
-  {chain:circleChain(0.340, -0.268, 0.122), tMax:1, color:W, lw:2.0},
+  // 6. HOLLOW ARM RECT  center(491,363) 220×95 -13° (outline only — lighter)
+  ...rectEdges(n(491),ny(363), 110/640,47/640, -13*DEG, D, 1.2),
 
-  // ARM RECT — [5] tilted arm rect
-  // area=17132, cx=-0.101, cy=0.243, w=0.340, h=0.124, ang=-38°
-  ...rectEdges(-0.101, 0.243, 0.170, 0.062, -38.0*DEG, D, 1.6),
+  // 7. HEAD CIRCLE  center(871,196) r=79
+  {chain:circleChain(n(871),ny(196), 79/640), tMax:1, color:W, lw:2.0},
 
-  // SMALL RECT — [6] small rect left-centre
-  // area=16639, cx=-0.193, cy=0.054, w=0.130, h=0.340, ang=-60.3°
-  ...rectEdges(-0.193, 0.054, 0.065, 0.170, -60.3*DEG, D, 1.4),
+  // 8. FOREARM RECT  center(607,432) 252×88 -18°
+  ...rectEdges(n(607),ny(432), 126/640,44/640, -18*DEG, D, 1.6),
 
-  // FOOT TRIANGLE — [7]
-  // area=7993, cx=0.729, cy=0.270, w=0.259, h=0.148, ang=-90°
-  ...triEdges(approxTriPts(0.729, 0.270, 0.130, 0.074, -90*DEG), D, 1.4),
+  // 9. ANKLE BLOCK  center(413,605) 82×38 0°
+  ...rectEdges(n(413),ny(605), 41/640,19/640, 0, D, 1.4),
 
-  // SMALL RECT — [8] tiny rect left
-  // area=3158, cx=-0.440, cy=0.083, w=0.075, h=0.157, ang=-24.8°
-  ...rectEdges(-0.440, 0.083, 0.037, 0.079, -24.8*DEG, D, 1.2),
+  // 10. SHIN RECT  center(920,542) 208×93 -9°
+  ...rectEdges(n(920),ny(542), 104/640,46/640, -9*DEG, D, 1.6),
 
-  // GROUND LINE
-  {chain:lineChain(-0.86, GROUND_Y, 0.86, GROUND_Y), tMax:0.5, color:[70,105,160], lw:0.8},
+  // 11. KNEE CIRCLE  center(720,515) r=68
+  {chain:circleChain(n(720),ny(515), 68/640), tMax:1, color:W, lw:1.8},
+
+  // 12. FOOT TRIANGLE  vertices: (1145,480),(1202,492),(1148,625)
+  ...triEdges([
+    [n(1145),ny(480)],
+    [n(1202),ny(492)],
+    [n(1148),ny(625)],
+  ], D, 1.4),
 ];
 
 // ── Eval ─────────────────────────────────────────────────────────────────────
 function evalChain(chain,t){
   let x=0,y=0; const arms=[];
   for(const c of chain){
-    let nx,ny;
-    if(c.dc){nx=c.x;ny=c.y;}
+    let nx2,ny2;
+    if(c.dc){nx2=c.x;ny2=c.y;}
     else{
       const a=c.freq*TAU*t+(c.phase||0);
-      nx=x+c.amp*Math.cos(a); ny=y+c.amp*Math.sin(a);
-      if(c.amp>2) arms.push({x0:x,y0:y,x1:nx,y1:ny,r:c.amp});
+      nx2=x+c.amp*Math.cos(a); ny2=y+c.amp*Math.sin(a);
+      if(c.amp>2) arms.push({x0:x,y0:y,x1:nx2,y1:ny2,r:c.amp});
     }
-    x=nx;y=ny;
+    x=nx2;y=ny2;
   }
   return {tip:{x,y},arms};
 }
