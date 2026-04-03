@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sujud — Constructivist Epicycles</title>
+<title>Sujud — Epicycles</title>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
 body { background:#0a0a0f; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; overflow:hidden; }
@@ -23,186 +23,176 @@ const canvas = document.getElementById('c');
 const ctx    = canvas.getContext('2d');
 let S;
 function resize(){
-  S = Math.min(window.innerWidth, window.innerHeight - 50, 720);
+  S = Math.min(window.innerWidth, window.innerHeight-50, 720);
   canvas.width = canvas.height = S;
-  canvas.style.width = canvas.style.height = S + 'px';
+  canvas.style.width = canvas.style.height = S+'px';
 }
 resize(); window.addEventListener('resize', resize);
 
-// ── Coordinate system ─────────────────────────────────────────────────────────
-// Source: pixel coords from 1280×698 image, normalised as:
-//   nx = (px - 640) / 640
-//   ny = (py - 349) / 640  (width used for both axes — square pixels from centre)
-//
-// Figure bounds: x[-0.800..0.878], y[-0.239..0.436]
-// Scale to fit canvas with 85% fill: SC = 0.85 / 1.678 ≈ 0.507
-// Centre offset: OX=0.039, OY=0.099
-const SC = 0.82;
-const OX = 0.039, OY = 0.099;
-
-function px(nx, ny){
-  return [S*0.5 + (nx-OX)*SC*S*0.5, S*0.5 + (ny-OY)*SC*S*0.5];
-}
-function pxS(n){ return n * SC * S * 0.5; }
-
-// ── Exact epicycle chains ─────────────────────────────────────────────────────
-function circleChain(cx,cy,r){
-  const [pcx,pcy]=px(cx,cy), pr=pxS(r);
-  return [{dc:true,x:pcx,y:pcy},{freq:1,amp:pr,phase:0}];
-}
-function lineChain(x1,y1,x2,y2){
-  const [mx,my]=px((x1+x2)/2,(y1+y2)/2);
-  const [p1x,p1y]=px(x1,y1),[p2x,p2y]=px(x2,y2);
-  const hx=(p2x-p1x)/2,hy=(p2y-p1y)/2;
-  const amp=Math.sqrt(hx*hx+hy*hy),phi=Math.atan2(hy,hx);
-  return [{dc:true,x:mx,y:my},{freq:+1,amp,phase:phi+Math.PI},{freq:-1,amp,phase:phi+Math.PI}];
-}
-function rCorners(cx,cy,hw,hh,ang){
-  return [[-hw,-hh],[hw,-hh],[hw,hh],[-hw,hh]].map(([lx,ly])=>[
-    lx*Math.cos(ang)-ly*Math.sin(ang)+cx,
-    lx*Math.sin(ang)+ly*Math.cos(ang)+cy
-  ]);
-}
-function rectEdges(cx,cy,hw,hh,ang,rgb,lw){
-  const C=rCorners(cx,cy,hw,hh,ang);
-  return [[0,1],[1,2],[2,3],[3,0]].map(([a,b])=>
-    ({chain:lineChain(...C[a],...C[b]),tMax:0.5,color:rgb,lw}));
-}
-function triEdges(pts,rgb,lw){
-  return [[0,1],[1,2],[2,0]].map(([a,b])=>
-    ({chain:lineChain(...pts[a],...pts[b]),tMax:0.5,color:rgb,lw}));
-}
-
-// ── Normalise pixel coords ────────────────────────────────────────────────────
-function n(px){ return (px-640)/640; }
-function ny(py){ return (py-349)/640; }
-
-const DEG = Math.PI/180;
-const W=[215,230,255], D=[160,195,245], DIM=[100,130,180];
-
-// ── Strokes — drawn back to front, each by epicycle chains ───────────────────
-// All data from Claude Code analysis of reference image (1280×698px)
-
-const STROKES = [
-  // 1. GROUND LINE  y=628, x:128→1202
-  {chain:lineChain(n(128),ny(628), n(1202),ny(628)), tMax:0.5, color:DIM, lw:0.8},
-
-  // 2. HIP CIRCLE  center(233,490) r=132
-  {chain:circleChain(n(233),ny(490), 132/640), tMax:1, color:W, lw:2.2},
-
-  // 3. TORSO RECT  center(555,235) 480×285 -5°
-  ...rectEdges(n(555),ny(235), 240/640,142/640, -5*DEG, W, 2.4),
-
-  // 4. THIGH STRIP  center(358,458) 68×110 -72°
-  ...rectEdges(n(358),ny(458), 34/640,55/640, -72*DEG, D, 1.4),
-
-  // 5. NECK RECT  center(838,302) 128×230 +10°
-  ...rectEdges(n(838),ny(302), 64/640,115/640, +10*DEG, W, 2.0),
-
-  // 6. HOLLOW ARM RECT  center(491,363) 220×95 -13° (outline only — lighter)
-  ...rectEdges(n(491),ny(363), 110/640,47/640, -13*DEG, D, 1.2),
-
-  // 7. HEAD CIRCLE  center(871,196) r=79
-  {chain:circleChain(n(871),ny(196), 79/640), tMax:1, color:W, lw:2.0},
-
-  // 8. FOREARM RECT  center(607,432) 252×88 -18°
-  ...rectEdges(n(607),ny(432), 126/640,44/640, -18*DEG, D, 1.6),
-
-  // 9. ANKLE BLOCK  center(413,605) 82×38 0°
-  ...rectEdges(n(413),ny(605), 41/640,19/640, 0, D, 1.4),
-
-  // 10. SHIN RECT  center(920,542) 208×93 -9°
-  ...rectEdges(n(920),ny(542), 104/640,46/640, -9*DEG, D, 1.6),
-
-  // 11. KNEE CIRCLE  center(720,515) r=68
-  {chain:circleChain(n(720),ny(515), 68/640), tMax:1, color:W, lw:1.8},
-
-  // 12. FOOT TRIANGLE  vertices: (1145,480),(1202,492),(1148,625)
-  ...triEdges([
-    [n(1145),ny(480)],
-    [n(1202),ny(492)],
-    [n(1148),ny(625)],
-  ], D, 1.4),
+// ── Precomputed DFT frequencies ────────────────────────────────────────────────
+// Source: cv2 outer contour of merged sujud silhouette (1280×698 reference image)
+// 256 equidistant points → DFT → top 80 frequencies by amplitude
+// Coordinates normalised: image centre = (0,0), scale = IW/2 = 640px
+// 256 silhouette points → DFT → top 80 frequencies
+const FREQS = [
+  {freq:1,amp:0.61551,phase:-1.50864},
+  {freq:-1,amp:0.17054,phase:1.48463},
+  {freq:0,amp:0.12695,phase:1.28487},
+  {freq:-2,amp:0.10536,phase:-1.36024},
+  {freq:4,amp:0.05949,phase:-1.80170},
+  {freq:2,amp:0.05351,phase:0.42247},
+  {freq:-3,amp:0.02327,phase:-0.21302},
+  {freq:-4,amp:0.02022,phase:0.57825},
+  {freq:3,amp:0.02018,phase:0.16354},
+  {freq:5,amp:0.01914,phase:-2.64087},
+  {freq:6,amp:0.01639,phase:1.95992},
+  {freq:-6,amp:0.01469,phase:2.14173},
+  {freq:-8,amp:0.01200,phase:-1.51727},
+  {freq:-7,amp:0.00584,phase:-2.83372},
+  {freq:-10,amp:0.00502,phase:1.80239},
+  {freq:-5,amp:0.00465,phase:0.71192},
+  {freq:11,amp:0.00390,phase:0.97652},
+  {freq:10,amp:0.00289,phase:-1.03416},
+  {freq:7,amp:0.00287,phase:2.59187},
+  {freq:12,amp:0.00276,phase:1.62652},
+  {freq:16,amp:0.00215,phase:-1.69781},
+  {freq:8,amp:0.00214,phase:3.14139},
+  {freq:-14,amp:0.00210,phase:-1.97418},
+  {freq:13,amp:0.00206,phase:-2.19856},
+  {freq:-11,amp:0.00175,phase:-1.10290},
+  {freq:15,amp:0.00163,phase:-0.17887},
+  {freq:18,amp:0.00148,phase:1.32934},
+  {freq:-16,amp:0.00129,phase:1.48914},
+  {freq:-15,amp:0.00122,phase:-1.65411},
+  {freq:-13,amp:0.00118,phase:2.56839},
+  {freq:14,amp:0.00118,phase:-0.22778},
+  {freq:9,amp:0.00104,phase:-2.26009},
+  {freq:-12,amp:0.00096,phase:-0.91086},
+  {freq:-19,amp:0.00090,phase:-1.92623},
+  {freq:-9,amp:0.00090,phase:1.70023},
+  {freq:20,amp:0.00087,phase:-1.86294},
+  {freq:-17,amp:0.00082,phase:1.40445},
+  {freq:19,amp:0.00070,phase:-1.84478},
+  {freq:-18,amp:0.00065,phase:-1.73701},
+  {freq:-20,amp:0.00048,phase:-1.70988},
+  {freq:17,amp:0.00035,phase:2.54803},
+  {freq:21,amp:0.00032,phase:0.96200},
+  {freq:23,amp:0.00029,phase:-1.18432},
+  {freq:-22,amp:0.00028,phase:1.25851},
+  {freq:-25,amp:0.00021,phase:-1.38659},
+  {freq:25,amp:0.00020,phase:-2.90794},
+  {freq:26,amp:0.00020,phase:-2.31783},
+  {freq:-21,amp:0.00019,phase:-0.23489},
+  {freq:-24,amp:0.00017,phase:-1.17569},
+  {freq:-23,amp:0.00015,phase:1.59866},
+  {freq:22,amp:0.00015,phase:-0.50483},
+  {freq:24,amp:0.00011,phase:0.76270},
+  {freq:27,amp:0.00011,phase:-0.13105},
+  {freq:29,amp:0.00010,phase:-2.69751},
+  {freq:-26,amp:0.00008,phase:-2.51267},
+  {freq:30,amp:0.00007,phase:1.29242},
+  {freq:32,amp:0.00006,phase:-2.11740},
+  {freq:-28,amp:0.00006,phase:0.01764},
+  {freq:28,amp:0.00005,phase:-1.37559},
+  {freq:-31,amp:0.00005,phase:-1.03734},
 ];
 
-// ── Eval ─────────────────────────────────────────────────────────────────────
-function evalChain(chain,t){
-  let x=0,y=0; const arms=[];
-  for(const c of chain){
-    let nx2,ny2;
-    if(c.dc){nx2=c.x;ny2=c.y;}
-    else{
-      const a=c.freq*TAU*t+(c.phase||0);
-      nx2=x+c.amp*Math.cos(a); ny2=y+c.amp*Math.sin(a);
-      if(c.amp>2) arms.push({x0:x,y0:y,x1:nx2,y1:ny2,r:c.amp});
-    }
-    x=nx2;y=ny2;
-  }
-  return {tip:{x,y},arms};
-}
-function drawArms(arms){
-  for(const a of arms){
-    if(a.r<2) continue;
-    ctx.beginPath(); ctx.arc(a.x0,a.y0,a.r,0,TAU);
-    ctx.strokeStyle='rgba(120,175,255,0.09)'; ctx.lineWidth=0.7; ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(a.x0,a.y0); ctx.lineTo(a.x1,a.y1);
-    ctx.strokeStyle='rgba(140,190,255,0.30)'; ctx.lineWidth=0.9; ctx.stroke();
-  }
-}
-function drawTrail(pts,rgb,lw){
-  if(pts.length<2) return;
-  ctx.beginPath(); ctx.moveTo(pts[0].x,pts[0].y);
-  for(let i=1;i<pts.length;i++) ctx.lineTo(pts[i].x,pts[i].y);
-  ctx.strokeStyle=`rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.92)`;
-  ctx.lineWidth=lw; ctx.lineJoin='round'; ctx.lineCap='round'; ctx.stroke();
+// ── Coordinate mapping ────────────────────────────────────────────────────────
+// Figure spans x:-0.903..0.902, y:-0.450..0.448 in normalised space
+// Scale to fill 88% of canvas
+const SC = 0.88 / 1.782;  // x span
+
+function toCanvas(nx, ny){
+  return [S*0.5 + nx*SC*S, S*0.5 + ny*SC*S];
 }
 
-const DRAW_SPEED=0.022, HOLD_FRAMES=120;
-let idx=0,t=0,trails=STROKES.map(()=>[]),phase='drawing',holding=0,lastTs=null,paused=false;
+// ── Epicycle evaluation ───────────────────────────────────────────────────────
+function evalEpicycles(t) {
+  let x=0, y=0;
+  const arms=[];
+  for(const f of FREQS){
+    const angle = f.freq * TAU * t + f.phase;
+    const nx = x + f.amp * Math.cos(angle);
+    const ny = y + f.amp * Math.sin(angle);
+    const [cx0,cy0] = toCanvas(x,y);
+    const [cx1,cy1] = toCanvas(nx,ny);
+    const r = f.amp * SC * S;
+    if(r > 2) arms.push({x0:cx0,y0:cy0,x1:cx1,y1:cy1,r});
+    x=nx; y=ny;
+  }
+  const [tipX,tipY] = toCanvas(x,y);
+  return {tip:{x:tipX,y:tipY}, arms};
+}
+
+// ── Animation ─────────────────────────────────────────────────────────────────
+const DRAW_SPEED = 0.0028;
+const HOLD_MS    = 2500;
+
+let t=0, trail=[], phase='drawing', holdMs=0, lastTs=null, paused=false;
+
+function drawArms(arms){
+  for(const a of arms){
+    ctx.beginPath(); ctx.arc(a.x0,a.y0,a.r,0,TAU);
+    ctx.strokeStyle='rgba(120,175,255,0.09)'; ctx.lineWidth=0.8; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(a.x0,a.y0); ctx.lineTo(a.x1,a.y1);
+    ctx.strokeStyle='rgba(140,190,255,0.32)'; ctx.lineWidth=1.0; ctx.stroke();
+  }
+}
 
 function tick(ts){
   if(!lastTs) lastTs=ts;
   const dt=Math.min((ts-lastTs)/1000,0.05); lastTs=ts;
   ctx.fillStyle='#0a0a0f'; ctx.fillRect(0,0,S,S);
+
   if(!paused){
     if(phase==='drawing'){
       t+=DRAW_SPEED*60*dt;
-      const tM=STROKES[idx].tMax;
-      if(t>=tM){
-        t=tM; const{tip}=evalChain(STROKES[idx].chain,t); trails[idx].push(tip);
-        idx++; if(idx>=STROKES.length){phase='holding';holding=0;} else{t=0;trails[idx]=[];}
-      } else { const{tip}=evalChain(STROKES[idx].chain,t); trails[idx].push(tip); }
+      if(t>=1){ t=1; phase='holding'; holdMs=0; }
+      const{tip}=evalEpicycles(t); trail.push({...tip});
     } else {
-      holding+=dt*60;
-      if(holding>HOLD_FRAMES){idx=0;t=0;trails=STROKES.map(()=>[]);phase='drawing';}
+      holdMs+=dt*1000;
+      if(holdMs>HOLD_MS){ t=0; trail=[]; phase='drawing'; }
     }
   }
-  for(let i=0;i<Math.min(idx,STROKES.length);i++)
-    if(trails[i].length>1) drawTrail(trails[i],STROKES[i].color,STROKES[i].lw);
-  if(phase==='drawing'&&idx<STROKES.length){
-    const s=STROKES[idx];
-    const{tip,arms}=evalChain(s.chain,t);
-    if(trails[idx].length>1) drawTrail(trails[idx],s.color,s.lw);
+
+  // Trail
+  if(trail.length>1){
+    ctx.beginPath(); ctx.moveTo(trail[0].x,trail[0].y);
+    for(let i=1;i<trail.length;i++) ctx.lineTo(trail[i].x,trail[i].y);
+    if(phase==='holding') ctx.closePath();
+    ctx.strokeStyle=phase==='holding'?'rgba(220,235,255,0.96)':'rgba(200,222,255,0.88)';
+    ctx.lineWidth=phase==='holding'?1.8:1.4;
+    ctx.lineJoin='round'; ctx.lineCap='round'; ctx.stroke();
+  }
+
+  // Arms (drawing only)
+  if(phase==='drawing'){
+    const{tip,arms}=evalEpicycles(t);
     drawArms(arms);
-    ctx.beginPath(); ctx.arc(tip.x,tip.y,3,0,TAU);
+    ctx.beginPath(); ctx.arc(tip.x,tip.y,3.5,0,TAU);
     ctx.fillStyle='rgba(255,255,255,0.95)'; ctx.fill();
   }
+
   requestAnimationFrame(tick);
 }
+
 window.salah={
   pause(){paused=true;},
   resume(){paused=false;},
   forceComplete(){
-    paused=true;
-    STROKES.forEach((s,i)=>{
-      trails[i]=[];
-      for(let j=0;j<=80;j++){const{tip}=evalChain(s.chain,j/80*s.tMax);trails[i].push(tip);}
-    });
-    idx=STROKES.length; phase='holding';
+    paused=true; t=1; trail=[];
+    const N=500;
+    for(let i=0;i<=N;i++){const{tip}=evalEpicycles(i/N);trail.push({...tip});}
+    phase='holding';
     ctx.fillStyle='#0a0a0f'; ctx.fillRect(0,0,S,S);
-    STROKES.forEach((s,i)=>{if(trails[i].length>1) drawTrail(trails[i],s.color,s.lw);});
+    ctx.beginPath(); ctx.moveTo(trail[0].x,trail[0].y);
+    for(let i=1;i<trail.length;i++) ctx.lineTo(trail[i].x,trail[i].y);
+    ctx.closePath();
+    ctx.strokeStyle='rgba(220,235,255,0.96)'; ctx.lineWidth=1.8;
+    ctx.lineJoin='round'; ctx.stroke();
   }
 };
+
 requestAnimationFrame(tick);
 })();
 </script>
