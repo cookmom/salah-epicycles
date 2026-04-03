@@ -23,48 +23,120 @@ const canvas = document.getElementById('c');
 const ctx    = canvas.getContext('2d');
 let S;
 function resize(){
-  S = Math.min(window.innerWidth, window.innerHeight-50, 720);
+  S = Math.min(window.innerWidth, window.innerHeight - 50, 720);
   canvas.width = canvas.height = S;
-  canvas.style.width = canvas.style.height = S+'px';
+  canvas.style.width = canvas.style.height = S + 'px';
 }
 resize(); window.addEventListener('resize', resize);
 
-// normalised → pixel
-function px(nx,ny){ return [S/2+nx*S*0.38, S/2+ny*S*0.38]; }
+// Normalised space: canvas centre = (0,0), ground at y=0.52
+// Figure spans roughly x: -0.72 (head left) to +0.70 (foot right)
+// Scale: S * 0.37
+
+function px(nx, ny){ return [S*0.5 + nx*S*0.37, S*0.5 + ny*S*0.37]; }
 
 // ── Exact epicycle chains ─────────────────────────────────────────────────────
 
-// CIRCLE: 1 arm
-function circleChain(cx,cy,r){
-  const [pcx,pcy]=px(cx,cy), pr=r*S*0.38;
+function circleChain(cx, cy, r){
+  const [pcx,pcy] = px(cx,cy), pr = r*S*0.37;
   return [{dc:true,x:pcx,y:pcy},{freq:1,amp:pr,phase:0}];
 }
 
-// LINE P1→P2: 2 counter-rotating arms
-// traces P1→P2 at t=0..0.5, back at t=0.5..1 → use tMax=0.5
-function lineChain(x1,y1,x2,y2){
-  const [mx,my]=px((x1+x2)/2,(y1+y2)/2);
-  const [p1x,p1y]=px(x1,y1), [p2x,p2y]=px(x2,y2);
+// Line P1→P2: 2 counter-rotating arms. tMax=0.5 (traces P1→P2 cleanly)
+function lineChain(x1,y1, x2,y2){
+  const [mx,my] = px((x1+x2)/2, (y1+y2)/2);
+  const [p1x,p1y] = px(x1,y1), [p2x,p2y] = px(x2,y2);
   const hx=(p2x-p1x)/2, hy=(p2y-p1y)/2;
   const amp=Math.sqrt(hx*hx+hy*hy), phi=Math.atan2(hy,hx);
+  return [{dc:true,x:mx,y:my},{freq:+1,amp,phase:phi+Math.PI},{freq:-1,amp,phase:phi+Math.PI}];
+}
+
+// Rotated rectangle corner points (normalised space)
+function rCorners(cx,cy, w,h, ang){
+  return [[-w,-h],[w,-h],[w,h],[-w,h]].map(([lx,ly])=>[
+    lx*Math.cos(ang)-ly*Math.sin(ang)+cx,
+    lx*Math.sin(ang)+ly*Math.cos(ang)+cy,
+  ]);
+}
+// Returns 4 line chains for rectangle edges
+function rectStrokes(cx,cy, w,h, ang, rgb, lw){
+  const C = rCorners(cx,cy,w,h,ang);
   return [
-    {dc:true,x:mx,y:my},
-    {freq:+1,amp,phase:phi+Math.PI},
-    {freq:-1,amp,phase:phi+Math.PI},
+    {chain:lineChain(...C[0],...C[1]), tMax:0.5, color:rgb, lw},
+    {chain:lineChain(...C[1],...C[2]), tMax:0.5, color:rgb, lw},
+    {chain:lineChain(...C[2],...C[3]), tMax:0.5, color:rgb, lw},
+    {chain:lineChain(...C[3],...C[0]), tMax:0.5, color:rgb, lw},
   ];
 }
 
-// ROTATED RECTANGLE corner helpers
-function rectCorners(cx,cy,w,h,angle){
-  const corners=[[-w,-h],[w,-h],[w,h],[-w,h]];
-  return corners.map(([lx,ly])=>[
-    lx*Math.cos(angle)-ly*Math.sin(angle)+cx,
-    lx*Math.sin(angle)+ly*Math.cos(angle)+cy,
-  ]);
+// Triangle: 3 line chains
+function triStrokes(x1,y1, x2,y2, x3,y3, rgb, lw){
+  return [
+    {chain:lineChain(x1,y1,x2,y2), tMax:0.5, color:rgb, lw},
+    {chain:lineChain(x2,y2,x3,y3), tMax:0.5, color:rgb, lw},
+    {chain:lineChain(x3,y3,x1,y1), tMax:0.5, color:rgb, lw},
+  ];
 }
 
+// ── Sujud primitives traced from reference ────────────────────────────────────
+// Reference analysis (left→right):
+// 1. LARGE CIRCLE — head, far left, resting on ground. Centre ~(-0.54, 0.30), r~0.22
+// 2. LARGE TRIANGLE — upper torso/back, tilted, apex upper-right. Dominant background shape.
+//    Apex ~(0.0, -0.44), base-left ~(-0.42, 0.16), base-right ~(0.18, 0.22)
+// 3. NECK RECT — small tilted rect between triangle and square. ~(-0.10, 0.06) 
+// 4. LARGE SQUARE — chest/shoulder, slightly tilted CW. Centre ~(0.22, -0.02), ~0.18 half-size
+// 5. ARM RECT — medium rect, steep CCW tilt (forearm/lower arm). Centre ~(-0.16, 0.34)
+// 6. SMALL RECT — near ground, slight tilt. Centre ~(-0.06, 0.44)
+// 7. KNEE CIRCLE — medium circle, centre ~(0.30, 0.32), r~0.14
+// 8. FOOT RECT — wide flat rect, far right. Centre ~(0.50, 0.40)
+// 9. FOOT TRIANGLE — small right-pointing triangle. tip ~(0.70, 0.36)
+// 10. GROUND LINE
+
+const W = [215,230,255]; // stroke colour
+const D = [160,195,245]; // dimmer for secondary shapes
+
+const STROKES = [
+  // 1. Head — large circle, far left
+  {chain:circleChain(-0.54, 0.28, 0.22), tMax:1, color:W, lw:2.2},
+
+  // 2. Large triangle — back/torso (apex up-right, base lower-left)
+  ...triStrokes(
+    -0.02,-0.46,   // apex (upper right)
+    -0.46, 0.18,   // base left
+     0.18, 0.22,   // base right
+    W, 2.4),
+
+  // 3. Neck rect — small, bridging triangle to square
+  ...rectStrokes(-0.10, 0.04, 0.06, 0.12, -Math.PI*0.10, D, 1.4),
+
+  // 4. Large square — chest, slightly tilted clockwise
+  ...rectStrokes(0.22, -0.04, 0.18, 0.18, Math.PI*0.08, W, 2.2),
+
+  // 5. Arm rect — medium, steep tilt (forearm going lower-left)
+  ...rectStrokes(-0.18, 0.32, 0.08, 0.22, -Math.PI*0.38, D, 1.6),
+
+  // 6. Small rect — near ground, slight tilt
+  ...rectStrokes(-0.06, 0.44, 0.10, 0.06, Math.PI*0.05, D, 1.4),
+
+  // 7. Knee circle — medium circle
+  {chain:circleChain(0.30, 0.32, 0.14), tMax:1, color:D, lw:1.8},
+
+  // 8. Foot rect — wide flat, far right
+  ...rectStrokes(0.50, 0.40, 0.16, 0.07, -Math.PI*0.05, D, 1.4),
+
+  // 9. Foot triangle — small, pointing right
+  ...triStrokes(
+    0.64, 0.28,   // apex (rightmost)
+    0.64, 0.48,   // bottom right
+    0.48, 0.38,   // left
+    D, 1.4),
+
+  // 10. Ground line
+  {chain:lineChain(-0.80, 0.52, 0.80, 0.52), tMax:0.5, color:[75,108,160], lw:0.8},
+];
+
 // ── Eval ─────────────────────────────────────────────────────────────────────
-function evalChain(chain,t){
+function evalChain(chain, t){
   let x=0,y=0; const arms=[];
   for(const c of chain){
     let nx,ny;
@@ -79,78 +151,35 @@ function evalChain(chain,t){
   return {tip:{x,y},arms};
 }
 
-// ── Sujud stroke list ─────────────────────────────────────────────────────────
-// Constructivist: head circle, forearms (lines), tilted back rectangle (4 edges), knee circle, foot line
-
-const A = -Math.PI*0.30; // ~54° tilt for back/torso rectangle
-const RC = rectCorners(-0.06,0.10, 0.14,0.50, A); // [TL,TR,BR,BL]
-
-const STROKES = [
-  // 1. Head circle
-  { chain: circleChain(-0.46, 0.26, 0.14),
-    tMax:1, color:[215,230,255], lw:2.0, close:false },
-
-  // 2. Left forearm
-  { chain: lineChain(-0.30,0.38, -0.64,0.46),
-    tMax:0.5, color:[160,195,245], lw:1.4, close:false },
-
-  // 3. Right forearm
-  { chain: lineChain(-0.30,0.38, -0.06,0.36),
-    tMax:0.5, color:[160,195,245], lw:1.4, close:false },
-
-  // 4–7. Back rectangle — 4 edges (TL→TR, TR→BR, BR→BL, BL→TL)
-  { chain: lineChain(...RC[0], ...RC[1]),
-    tMax:0.5, color:[215,230,255], lw:2.2, close:false },
-  { chain: lineChain(...RC[1], ...RC[2]),
-    tMax:0.5, color:[215,230,255], lw:2.2, close:false },
-  { chain: lineChain(...RC[2], ...RC[3]),
-    tMax:0.5, color:[215,230,255], lw:2.2, close:false },
-  { chain: lineChain(...RC[3], ...RC[0]),
-    tMax:0.5, color:[215,230,255], lw:2.2, close:false },
-
-  // 8. Knee circle (small)
-  { chain: circleChain(0.28, 0.46, 0.07),
-    tMax:1, color:[160,195,245], lw:1.6, close:false },
-
-  // 9. Foot line
-  { chain: lineChain(0.32,0.54, 0.54,0.56),
-    tMax:0.5, color:[160,195,245], lw:1.4, close:false },
-
-  // 10. Ground
-  { chain: lineChain(-0.68,0.62, 0.62,0.62),
-    tMax:0.5, color:[75,108,160], lw:0.7, close:false },
-];
-
-// ── Animation ─────────────────────────────────────────────────────────────────
-const DRAW_SPEED  = 0.020;
-const HOLD_FRAMES = 120;
-
-let idx=0, t=0;
-let trails = STROKES.map(()=>[]);
-let phase='drawing', holding=0, lastTs=null, paused=false;
-
+// ── Draw helpers ─────────────────────────────────────────────────────────────
 function drawArms(arms){
   for(const a of arms){
     if(a.r<2) continue;
     ctx.beginPath(); ctx.arc(a.x0,a.y0,a.r,0,TAU);
     ctx.strokeStyle='rgba(120,175,255,0.09)'; ctx.lineWidth=0.7; ctx.stroke();
     ctx.beginPath(); ctx.moveTo(a.x0,a.y0); ctx.lineTo(a.x1,a.y1);
-    ctx.strokeStyle='rgba(140,190,255,0.32)'; ctx.lineWidth=0.9; ctx.stroke();
+    ctx.strokeStyle='rgba(140,190,255,0.30)'; ctx.lineWidth=0.9; ctx.stroke();
   }
 }
-
 function drawTrail(pts,rgb,lw){
   if(pts.length<2) return;
   ctx.beginPath(); ctx.moveTo(pts[0].x,pts[0].y);
   for(let i=1;i<pts.length;i++) ctx.lineTo(pts[i].x,pts[i].y);
-  ctx.strokeStyle=`rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.90)`;
+  ctx.strokeStyle=`rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.92)`;
   ctx.lineWidth=lw; ctx.lineJoin='round'; ctx.lineCap='round'; ctx.stroke();
 }
+
+// ── Animation ─────────────────────────────────────────────────────────────────
+const DRAW_SPEED  = 0.022;
+const HOLD_FRAMES = 120;
+
+let idx=0, t=0;
+let trails=STROKES.map(()=>[]);
+let phase='drawing', holding=0, lastTs=null, paused=false;
 
 function tick(ts){
   if(!lastTs) lastTs=ts;
   const dt=Math.min((ts-lastTs)/1000,0.05); lastTs=ts;
-
   ctx.fillStyle='#0a0a0f'; ctx.fillRect(0,0,S,S);
 
   if(!paused){
@@ -168,15 +197,13 @@ function tick(ts){
       }
     } else {
       holding+=dt*60;
-      if(holding>HOLD_FRAMES){ idx=0;t=0;trails=STROKES.map(()=>[]);phase='drawing'; }
+      if(holding>HOLD_FRAMES){idx=0;t=0;trails=STROKES.map(()=>[]);phase='drawing';}
     }
   }
 
-  // Completed
   for(let i=0;i<Math.min(idx,STROKES.length);i++)
     if(trails[i].length>1) drawTrail(trails[i],STROKES[i].color,STROKES[i].lw);
 
-  // Active
   if(phase==='drawing'&&idx<STROKES.length){
     const s=STROKES[idx];
     const {tip,arms}=evalChain(s.chain,t);
@@ -195,15 +222,14 @@ window.salah={
     paused=true;
     STROKES.forEach((s,i)=>{
       trails[i]=[];
-      const N=80;
-      for(let j=0;j<=N;j++){
-        const {tip}=evalChain(s.chain,j/N*s.tMax);
+      for(let j=0;j<=80;j++){
+        const {tip}=evalChain(s.chain,j/80*s.tMax);
         trails[i].push(tip);
       }
     });
     idx=STROKES.length; phase='holding';
     ctx.fillStyle='#0a0a0f'; ctx.fillRect(0,0,S,S);
-    STROKES.forEach((s,i)=>{ if(trails[i].length>1) drawTrail(trails[i],s.color,s.lw); });
+    STROKES.forEach((s,i)=>{if(trails[i].length>1) drawTrail(trails[i],s.color,s.lw);});
   }
 };
 
