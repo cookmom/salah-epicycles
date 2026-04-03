@@ -23,18 +23,32 @@ const canvas = document.getElementById('c');
 const ctx    = canvas.getContext('2d');
 let S;
 function resize(){
-  S = Math.min(window.innerWidth, window.innerHeight-50, 720);
+  S = Math.min(window.innerWidth, window.innerHeight - 50, 720);
   canvas.width = canvas.height = S;
-  canvas.style.width = canvas.style.height = S+'px';
+  canvas.style.width = canvas.style.height = S + 'px';
 }
 resize(); window.addEventListener('resize', resize);
 
-// Normalised (-1..1) → pixel
-function px(nx,ny){ return [S*0.5+nx*S*0.72, S*0.5+ny*S*0.72]; }
+// ── Coordinate system ─────────────────────────────────────────────────────────
+// Source coords: normalised to image width, centre = (0,0)
+// Image is 1280×698. y coords use IW as scale (square pixels from centre).
+// All shape values derived from cv2.minAreaRect on actual pixel data.
+//
+// Canvas scale: multiply norm coords by S * SC, offset by (S*OX, S*OY)
+// Chosen to fit figure with margin: figure spans x:-0.684..0.862, y:-0.268..0.544
+// Centre of figure: x_mid=0.089, y_mid=0.138. Scale to fill ~88% of canvas.
+const SC = 0.88 / 1.546;  // 1.546 = total width span
+const OX = -0.089 * SC;   // centre figure in canvas
+const OY = -0.138 * SC;
+
+function px(nx, ny){
+  return [S*0.5 + (nx*SC + OX)*S*0.5, S*0.5 + (ny*SC + OY)*S*0.5];
+}
+function pxS(n){ return n * SC * S * 0.5; } // scale only (for radii/sizes)
 
 // ── Exact epicycle chains ─────────────────────────────────────────────────────
 function circleChain(cx,cy,r){
-  const [pcx,pcy]=px(cx,cy), pr=r*S*0.38;
+  const [pcx,pcy]=px(cx,cy), pr=pxS(r);
   return [{dc:true,x:pcx,y:pcy},{freq:1,amp:pr,phase:0}];
 }
 function lineChain(x1,y1,x2,y2){
@@ -44,80 +58,89 @@ function lineChain(x1,y1,x2,y2){
   const amp=Math.sqrt(hx*hx+hy*hy),phi=Math.atan2(hy,hx);
   return [{dc:true,x:mx,y:my},{freq:+1,amp,phase:phi+Math.PI},{freq:-1,amp,phase:phi+Math.PI}];
 }
-function rCorners(cx,cy,w,h,ang){
-  return [[-w,-h],[w,-h],[w,h],[-w,h]].map(([lx,ly])=>[
+function rCorners(cx,cy,hw,hh,ang){
+  return [[-hw,-hh],[hw,-hh],[hw,hh],[-hw,hh]].map(([lx,ly])=>[
     lx*Math.cos(ang)-ly*Math.sin(ang)+cx,
     lx*Math.sin(ang)+ly*Math.cos(ang)+cy
   ]);
 }
-function rectEdges(cx,cy,w,h,ang,rgb,lw){
-  const C=rCorners(cx,cy,w,h,ang);
+function rectEdges(cx,cy,hw,hh,ang,rgb,lw){
+  const C=rCorners(cx,cy,hw,hh,ang);
   return [[0,1],[1,2],[2,3],[3,0]].map(([a,b])=>
     ({chain:lineChain(...C[a],...C[b]),tMax:0.5,color:rgb,lw}));
 }
-function triEdges(x1,y1,x2,y2,x3,y3,rgb,lw){
+function triEdges(pts,rgb,lw){
+  return [[0,1],[1,2],[2,0]].map(([a,b])=>
+    ({chain:lineChain(...pts[a],...pts[b]),tMax:0.5,color:rgb,lw}));
+}
+function approxTriPts(cx,cy,hw,hh,ang){
+  // From minAreaRect: approximate triangle as right-pointing shape
+  // apex = centre + half the long axis, base = two points at -half long axis
+  const lx=hw*Math.cos(ang), ly=hw*Math.sin(ang);
+  const wx=hh*Math.cos(ang+Math.PI/2), wy=hh*Math.sin(ang+Math.PI/2);
   return [
-    {chain:lineChain(x1,y1,x2,y2),tMax:0.5,color:rgb,lw},
-    {chain:lineChain(x2,y2,x3,y3),tMax:0.5,color:rgb,lw},
-    {chain:lineChain(x3,y3,x1,y1),tMax:0.5,color:rgb,lw},
+    [cx+lx,   cy+ly],           // apex
+    [cx-lx+wx, cy-ly+wy],       // base top
+    [cx-lx-wx, cy-ly-wy],       // base bottom
   ];
 }
 
-// ── SAM3-derived shape parameters ────────────────────────────────────────────
-// Coordinates from SAM3 segmentation of reference image, remapped to canvas space
-// Image W=1280, H=698. Remapped with scale=0.62, offset=(-0.06,-0.10)
-// Shape orientations estimated from SAM3 mask contour analysis
-
+// ── Shape data from cv2.minAreaRect on actual reference pixel data ─────────────
+// All values: cx,cy in normalised coords (÷ IW/2 from image centre)
+//             hw,hh = half-width, half-height in same units
+//             angle in radians (from cv2 degrees, converted)
+const DEG = Math.PI / 180;
 const W=[215,230,255], D=[160,195,245];
 
-// head:      cx=-0.345, cy=0.298, r≈0.112 (use larger of hw/hh)
-// triangle:  cx=-0.045, cy=-0.064, corners estimated from SAM3 bbox+shape
-// square:    cx=0.143,  cy=-0.074, hw=0.063, hh=0.102, slight tilt
-// arm_rect:  cx=0.003,  cy=0.301,  hw=0.051, hh=0.073, steep tilt
-// sm_rect:   cx=0.050,  cy=0.359,  hw=0.033, hh=0.043, slight tilt
-// knee:      cx=0.299,  cy=0.161,  r≈0.055
-// foot_rect: cx=0.431,  cy=0.250,  hw=0.051, hh=0.048, slight tilt
-// foot_tri:  cx=0.492,  cy=0.229,  corners from bbox
+// Ground line (detected separately)
+const GROUND_Y = 0.544;
 
 const STROKES = [
-  // 1. HEAD — circle
-  {chain:circleChain(-0.345, 0.298, 0.112), tMax:1, color:W, lw:2.2},
+  // HEAD — large circle, far left
+  // cv2 minEnclosingCircle: cx=202.5, cy=495.0, r=164.4 on 1280×698 image
+  // norm: cx=-0.684, cy=-0.227 (using IW/2=640 as scale for both axes... but cy uses IH)
+  // Actual pixel cy=495 → (495-698/2)/(1280/2) = 146/640 = 0.228
+  {chain:circleChain(-0.684, 0.228, 0.257), tMax:1, color:W, lw:2.2},
 
-  // 2. BACK TRIANGLE — large, leaning right
-  // apex upper-right, base lower-left (from SAM3 bbox: x:-0.147..0.057, y:-0.154..-0.026 → in canvas)
-  // apex ~(-0.045+0.102, -0.064-0.091) = (0.057,-0.155)
-  // base-left ~(-0.147, -0.026), base-right ~(0.057, -0.026)
-  ...triEdges(
-     0.057,-0.155,   // apex (upper right)
-    -0.147,-0.026,   // base left
-     0.057,-0.026,   // base right... but triangle is diagonal not vertical
-    W, 2.4),
+  // LARGE BODY SHAPE — [0] classified as triangle, but it's the big torso shape
+  // area=77139, cx=-0.001, cy=0.211, w=0.400, h=1.730, ang=-90°
+  // It's actually a large irregular quad — use its minAreaRect as a tall rect
+  ...rectEdges(-0.001, 0.211, 0.200, 0.865, -90*DEG, W, 2.4),
 
-  // 3. CHEST SQUARE — slightly tilted CW
-  ...rectEdges(0.143, -0.074, 0.063, 0.102, Math.PI*0.06, W, 2.2),
+  // BIG TILTED RECT — [1] the main back rectangle
+  // area=70337, cx=-0.073, cy=-0.114, w=0.729, h=0.326, ang=-24.5°
+  ...rectEdges(-0.073, -0.114, 0.364, 0.163, -24.5*DEG, W, 2.2),
 
-  // 4. ARM RECT — steep tilt (forearm angled ~40° CCW)
-  ...rectEdges(0.003, 0.301, 0.051, 0.073, -Math.PI*0.38, D, 1.6),
+  // CIRCLE — [2] knee/mid circle
+  // area=29913, cx=0.264, cy=0.014, w=0.317, h=0.231 → r≈0.137
+  {chain:circleChain(0.264, 0.014, 0.137), tMax:1, color:D, lw:1.8},
 
-  // 5. SMALL RECT — near ground, minimal tilt
-  ...rectEdges(0.050, 0.359, 0.033, 0.043, Math.PI*0.04, D, 1.4),
+  // FOOT RECT — [3] wide rect far right
+  // area=20943, cx=0.487, cy=0.259, w=0.333, h=0.154, ang=-10.7°
+  ...rectEdges(0.487, 0.259, 0.167, 0.077, -10.7*DEG, D, 1.4),
 
-  // 6. KNEE CIRCLE
-  {chain:circleChain(0.299, 0.161, 0.055), tMax:1, color:D, lw:1.8},
+  // UPPER CIRCLE — [4] chest/shoulder circle (upper right area)
+  // area=19385, cx=0.340, cy=-0.268, r≈0.122
+  {chain:circleChain(0.340, -0.268, 0.122), tMax:1, color:W, lw:2.0},
 
-  // 7. FOOT RECT — wide flat, slight tilt
-  ...rectEdges(0.431, 0.250, 0.051, 0.048, -Math.PI*0.04, D, 1.4),
+  // ARM RECT — [5] tilted arm rect
+  // area=17132, cx=-0.101, cy=0.243, w=0.340, h=0.124, ang=-38°
+  ...rectEdges(-0.101, 0.243, 0.170, 0.062, -38.0*DEG, D, 1.6),
 
-  // 8. FOOT TRIANGLE — pointing right
-  // SAM3 bbox: x:0.452..0.532, y:0.164..0.294 → apex right, base left
-  ...triEdges(
-    0.532, 0.229,   // apex (right)
-    0.452, 0.164,   // top-left
-    0.452, 0.294,   // bottom-left
-    D, 1.4),
+  // SMALL RECT — [6] small rect left-centre
+  // area=16639, cx=-0.193, cy=0.054, w=0.130, h=0.340, ang=-60.3°
+  ...rectEdges(-0.193, 0.054, 0.065, 0.170, -60.3*DEG, D, 1.4),
 
-  // 9. GROUND LINE
-  {chain:lineChain(-0.72,0.50, 0.72,0.50), tMax:0.5, color:[75,108,160], lw:0.8},
+  // FOOT TRIANGLE — [7]
+  // area=7993, cx=0.729, cy=0.270, w=0.259, h=0.148, ang=-90°
+  ...triEdges(approxTriPts(0.729, 0.270, 0.130, 0.074, -90*DEG), D, 1.4),
+
+  // SMALL RECT — [8] tiny rect left
+  // area=3158, cx=-0.440, cy=0.083, w=0.075, h=0.157, ang=-24.8°
+  ...rectEdges(-0.440, 0.083, 0.037, 0.079, -24.8*DEG, D, 1.2),
+
+  // GROUND LINE
+  {chain:lineChain(-0.86, GROUND_Y, 0.86, GROUND_Y), tMax:0.5, color:[70,105,160], lw:0.8},
 ];
 
 // ── Eval ─────────────────────────────────────────────────────────────────────
@@ -135,7 +158,6 @@ function evalChain(chain,t){
   }
   return {tip:{x,y},arms};
 }
-
 function drawArms(arms){
   for(const a of arms){
     if(a.r<2) continue;
@@ -154,7 +176,7 @@ function drawTrail(pts,rgb,lw){
 }
 
 const DRAW_SPEED=0.022, HOLD_FRAMES=120;
-let idx=0, t=0, trails=STROKES.map(()=>[]), phase='drawing', holding=0, lastTs=null, paused=false;
+let idx=0,t=0,trails=STROKES.map(()=>[]),phase='drawing',holding=0,lastTs=null,paused=false;
 
 function tick(ts){
   if(!lastTs) lastTs=ts;
@@ -165,10 +187,9 @@ function tick(ts){
       t+=DRAW_SPEED*60*dt;
       const tM=STROKES[idx].tMax;
       if(t>=tM){
-        t=tM;
-        const {tip}=evalChain(STROKES[idx].chain,t); trails[idx].push(tip);
+        t=tM; const{tip}=evalChain(STROKES[idx].chain,t); trails[idx].push(tip);
         idx++; if(idx>=STROKES.length){phase='holding';holding=0;} else{t=0;trails[idx]=[];}
-      } else { const {tip}=evalChain(STROKES[idx].chain,t); trails[idx].push(tip); }
+      } else { const{tip}=evalChain(STROKES[idx].chain,t); trails[idx].push(tip); }
     } else {
       holding+=dt*60;
       if(holding>HOLD_FRAMES){idx=0;t=0;trails=STROKES.map(()=>[]);phase='drawing';}
@@ -178,7 +199,7 @@ function tick(ts){
     if(trails[i].length>1) drawTrail(trails[i],STROKES[i].color,STROKES[i].lw);
   if(phase==='drawing'&&idx<STROKES.length){
     const s=STROKES[idx];
-    const {tip,arms}=evalChain(s.chain,t);
+    const{tip,arms}=evalChain(s.chain,t);
     if(trails[idx].length>1) drawTrail(trails[idx],s.color,s.lw);
     drawArms(arms);
     ctx.beginPath(); ctx.arc(tip.x,tip.y,3,0,TAU);
