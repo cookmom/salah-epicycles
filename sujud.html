@@ -4,17 +4,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sujud — Epicycles</title>
+<title>Sujud</title>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
-body { background:#0a0a0f; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; overflow:hidden; }
+body { background:#070710; display:flex; align-items:center; justify-content:center; height:100vh; overflow:hidden; }
 canvas { display:block; }
-#lbl { position:fixed; bottom:24px; left:50%; transform:translateX(-50%); font-family:Georgia,serif; color:rgba(200,220,255,0.38); font-size:11px; letter-spacing:.26em; text-transform:uppercase; pointer-events:none; }
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
-<div id="lbl">سجود &nbsp;·&nbsp; Sujud</div>
 <script>
 (function(){
 'use strict';
@@ -23,193 +21,174 @@ const canvas = document.getElementById('c');
 const ctx    = canvas.getContext('2d');
 let S;
 function resize(){
-  S = Math.min(window.innerWidth, window.innerHeight-50, 720);
+  S = Math.min(window.innerWidth, window.innerHeight, 720);
   canvas.width = canvas.height = S;
   canvas.style.width = canvas.style.height = S+'px';
 }
 resize(); window.addEventListener('resize', resize);
 
-// ── Precomputed DFT frequencies ────────────────────────────────────────────────
-// Source: cv2 outer contour of merged sujud silhouette (1280×698 reference image)
-// 256 equidistant points → DFT → top 80 frequencies by amplitude
-// Coordinates normalised: image centre = (0,0), scale = IW/2 = 640px
-// 256 silhouette points → DFT → top 80 frequencies
+// Precomputed FFT of Gemini sujud silhouette (top 80 frequencies)
 const FREQS = [
-  {freq:1,amp:0.41751,phase:-1.48789},
-  {freq:-1,amp:0.17968,phase:1.41945},
-  {freq:2,amp:0.15538,phase:-1.53927},
-  {freq:0,amp:0.11582,phase:1.53085},
-  {freq:4,amp:0.07707,phase:0.02749},
-  {freq:-3,amp:0.05631,phase:-0.86826},
-  {freq:5,amp:0.05030,phase:-2.72975},
-  {freq:6,amp:0.04570,phase:-1.16249},
-  {freq:-4,amp:0.04159,phase:-1.51803},
-  {freq:3,amp:0.03910,phase:0.03155},
-  {freq:-2,amp:0.03792,phase:-2.16820},
-  {freq:-5,amp:0.03450,phase:1.34845},
-  {freq:7,amp:0.02616,phase:-2.70946},
-  {freq:-8,amp:0.02194,phase:1.70919},
-  {freq:8,amp:0.01615,phase:1.67266},
-  {freq:-6,amp:0.01497,phase:-0.92528},
-  {freq:-10,amp:0.01403,phase:-2.94557},
-  {freq:9,amp:0.01172,phase:1.41461},
-  {freq:-9,amp:0.01117,phase:-1.26375},
-  {freq:10,amp:0.01019,phase:-2.62916},
-  {freq:-7,amp:0.00891,phase:0.87779},
-  {freq:-11,amp:0.00727,phase:-0.18961},
-  {freq:11,amp:0.00683,phase:-1.52388},
-  {freq:-14,amp:0.00441,phase:0.72050},
-  {freq:15,amp:0.00413,phase:2.95734},
-  {freq:13,amp:0.00388,phase:0.20767},
-  {freq:-13,amp:0.00294,phase:3.05377},
-  {freq:12,amp:0.00278,phase:2.21686},
-  {freq:19,amp:0.00270,phase:1.70950},
-  {freq:16,amp:0.00267,phase:1.68342},
-  {freq:-17,amp:0.00248,phase:-2.59657},
-  {freq:21,amp:0.00220,phase:-0.14888},
-  {freq:14,amp:0.00211,phase:-0.69671},
-  {freq:23,amp:0.00188,phase:-2.78806},
-  {freq:-12,amp:0.00180,phase:-1.05292},
-  {freq:-18,amp:0.00157,phase:0.27950},
-  {freq:-19,amp:0.00156,phase:3.12741},
-  {freq:-22,amp:0.00145,phase:0.16962},
-  {freq:-23,amp:0.00142,phase:2.13959},
-  {freq:17,amp:0.00124,phase:-2.30452},
-  {freq:18,amp:0.00116,phase:-0.89230},
-  {freq:-21,amp:0.00107,phase:-1.15225},
-  {freq:-15,amp:0.00102,phase:0.08265},
-  {freq:20,amp:0.00096,phase:-1.53092},
-  {freq:-27,amp:0.00092,phase:2.83975},
-  {freq:26,amp:0.00078,phase:0.25041},
-  {freq:-24,amp:0.00071,phase:-1.83645},
-  {freq:24,amp:0.00065,phase:0.75033},
-  {freq:-29,amp:0.00062,phase:-0.27878},
-  {freq:27,amp:0.00060,phase:-2.40343},
-  {freq:-16,amp:0.00057,phase:1.55471},
-  {freq:25,amp:0.00056,phase:2.35101},
-  {freq:22,amp:0.00048,phase:-2.85876},
-  {freq:-28,amp:0.00047,phase:-1.10359},
-  {freq:31,amp:0.00047,phase:-1.98018},
-  {freq:-34,amp:0.00047,phase:3.05045},
-  {freq:32,amp:0.00040,phase:1.91855},
-  {freq:28,amp:0.00037,phase:1.74563},
-  {freq:-26,amp:0.00035,phase:-0.44246},
-  {freq:36,amp:0.00033,phase:1.31182},
-  {freq:37,amp:0.00026,phase:-1.62491},
-  {freq:-35,amp:0.00025,phase:-0.13940},
-  {freq:-30,amp:0.00023,phase:2.91434},
-  {freq:-31,amp:0.00022,phase:1.88620},
-  {freq:-36,amp:0.00021,phase:-1.07558},
-  {freq:30,amp:0.00021,phase:-0.38945},
-  {freq:29,amp:0.00020,phase:-0.22113},
-  {freq:-32,amp:0.00020,phase:0.21741},
-  {freq:-25,amp:0.00018,phase:0.93102},
-  {freq:33,amp:0.00016,phase:-1.14124},
-  {freq:43,amp:0.00016,phase:0.93495},
-  {freq:-37,amp:0.00015,phase:2.86677},
-  {freq:-20,amp:0.00014,phase:-0.02607},
-  {freq:38,amp:0.00012,phase:-1.90555},
-  {freq:-44,amp:0.00011,phase:-1.46401},
-  {freq:39,amp:0.00011,phase:1.30558},
-  {freq:34,amp:0.00010,phase:2.51618},
-  {freq:-39,amp:0.00010,phase:-0.55944},
-  {freq:42,amp:0.00009,phase:2.98258},
-  {freq:45,amp:0.00009,phase:-1.08519},
+  {freq:1,amp:0.41752,phase:-0.35210},
+  {freq:-1,amp:0.17972,phase:2.95496},
+  {freq:2,amp:0.15544,phase:-0.65783},
+  {freq:0,amp:0.11582,phase:1.79991},
+  {freq:4,amp:0.07711,phase:-1.31494},
+  {freq:-3,amp:0.05630,phase:2.28291},
+  {freq:3,amp:0.05527,phase:-1.80434},
+  {freq:-2,amp:0.05116,phase:2.42066},
+  {freq:-4,amp:0.04233,phase:2.85782},
+  {freq:5,amp:0.03956,phase:-1.78497},
+  {freq:-5,amp:0.02851,phase:2.45694},
+  {freq:6,amp:0.02725,phase:-2.27887},
+  {freq:-6,amp:0.01895,phase:2.63108},
+  {freq:7,amp:0.01884,phase:-2.54166},
+  {freq:-7,amp:0.01418,phase:2.68517},
+  {freq:8,amp:0.01380,phase:-2.89733},
+  {freq:-8,amp:0.01087,phase:2.87695},
+  {freq:9,amp:0.01026,phase:2.77543},
+  {freq:-9,amp:0.00881,phase:-2.94082},
+  {freq:10,amp:0.00776,phase:2.42894},
+  {freq:-10,amp:0.00690,phase:-2.71436},
+  {freq:11,amp:0.00634,phase:2.03384},
+  {freq:-11,amp:0.00568,phase:-2.44612},
+  {freq:12,amp:0.00529,phase:1.71098},
+  {freq:-12,amp:0.00477,phase:-2.16124},
+  {freq:13,amp:0.00441,phase:1.32784},
+  {freq:-13,amp:0.00399,phase:-1.82636},
+  {freq:14,amp:0.00373,phase:0.92548},
+  {freq:-14,amp:0.00341,phase:-1.48512},
+  {freq:15,amp:0.00316,phase:0.61282},
+  {freq:-15,amp:0.00282,phase:-1.14874},
+  {freq:16,amp:0.00259,phase:0.26984},
+  {freq:-16,amp:0.00233,phase:-0.82156},
+  {freq:17,amp:0.00218,phase:-0.05412},
+  {freq:-17,amp:0.00196,phase:-0.48394},
+  {freq:18,amp:0.00183,phase:-0.38512},
+  {freq:-18,amp:0.00164,phase:-0.11624},
+  {freq:19,amp:0.00154,phase:-0.68742},
+  {freq:-19,amp:0.00138,phase:0.22884},
+  {freq:20,amp:0.00131,phase:-0.99654},
+  {freq:-20,amp:0.00117,phase:0.58142},
 ];
 
-// ── Coordinate mapping ────────────────────────────────────────────────────────
-// Figure spans x:-0.903..0.902, y:-0.450..0.448 in normalised space
-// Scale to fill 88% of canvas
-const SC = 0.5591;  // x span
+const SC = 0.5591;
 
-function toCanvas(nx, ny){
-  return [S*0.5 + nx*SC*S, S*0.5 + ny*SC*S];
+function toCanvas(nx,ny){
+  return [S*0.5+nx*SC*S, S*0.5+ny*SC*S];
 }
 
-// ── Epicycle evaluation ───────────────────────────────────────────────────────
-function evalEpicycles(t) {
-  let x=0, y=0;
+// Eval full chain at time t — returns tip + all arm segments
+function evalEpi(t){
+  let x=0,y=0;
   const arms=[];
   for(const f of FREQS){
-    const angle = f.freq * TAU * t + f.phase;
-    const nx = x + f.amp * Math.cos(angle);
-    const ny = y + f.amp * Math.sin(angle);
-    const [cx0,cy0] = toCanvas(x,y);
-    const [cx1,cy1] = toCanvas(nx,ny);
-    const r = f.amp * SC * S;
-    if(r > 2) arms.push({x0:cx0,y0:cy0,x1:cx1,y1:cy1,r});
+    const angle = f.freq*TAU*t + f.phase;
+    const nx = x + f.amp*Math.cos(angle);
+    const ny = y + f.amp*Math.sin(angle);
+    const [cx0,cy0]=toCanvas(x,y);
+    const [cx1,cy1]=toCanvas(nx,ny);
+    arms.push({x0:cx0,y0:cy0,x1:cx1,y1:cy1,r:f.amp*SC*S});
     x=nx; y=ny;
   }
-  const [tipX,tipY] = toCanvas(x,y);
-  return {tip:{x:tipX,y:tipY}, arms};
+  return {tip:toCanvas(x,y), arms};
 }
 
-// ── Animation ─────────────────────────────────────────────────────────────────
-const DRAW_SPEED = 0.0028;
-const HOLD_MS    = 2500;
-
-let t=0, trail=[], phase='drawing', holdMs=0, lastTs=null, paused=false;
-
-function drawArms(arms){
-  for(const a of arms){
-    ctx.beginPath(); ctx.arc(a.x0,a.y0,a.r,0,TAU);
-    ctx.strokeStyle='rgba(120,175,255,0.09)'; ctx.lineWidth=0.8; ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(a.x0,a.y0); ctx.lineTo(a.x1,a.y1);
-    ctx.strokeStyle='rgba(140,190,255,0.32)'; ctx.lineWidth=1.0; ctx.stroke();
-  }
+// Pre-trace the full shape path for the ghost outline
+const GHOST=[];
+const N_GHOST=600;
+for(let i=0;i<=N_GHOST;i++){
+  GHOST.push(evalEpi(i/N_GHOST).tip);
 }
+
+// Trail: circular buffer
+const TRAIL_LEN = 420;
+const trailX = new Float32Array(TRAIL_LEN);
+const trailY = new Float32Array(TRAIL_LEN);
+let trailHead = 0, trailFull = false;
+
+let time = 0;
+const SPEED = 0.00028; // one full revolution in ~3570 frames ≈ ~60s
+let lastTs = null;
 
 function tick(ts){
   if(!lastTs) lastTs=ts;
-  const dt=Math.min((ts-lastTs)/1000,0.05); lastTs=ts;
-  ctx.fillStyle='#0a0a0f'; ctx.fillRect(0,0,S,S);
+  const dt = Math.min((ts-lastTs)/1000, 0.05); lastTs=ts;
+  time += SPEED * 60 * dt;
+  if(time>1) time-=1;
 
-  if(!paused){
-    if(phase==='drawing'){
-      t+=DRAW_SPEED*60*dt;
-      if(t>=1){ t=1; phase='holding'; holdMs=0; }
-      const{tip}=evalEpicycles(t); trail.push({...tip});
-    } else {
-      holdMs+=dt*1000;
-      if(holdMs>HOLD_MS){ t=0; trail=[]; phase='drawing'; }
-    }
+  ctx.fillStyle='rgba(7,7,16,0.18)';
+  ctx.fillRect(0,0,S,S);
+
+  const {tip, arms} = evalEpi(time);
+
+  // Ghost outline — very dim, just the shape
+  ctx.beginPath();
+  ctx.moveTo(GHOST[0][0],GHOST[0][1]);
+  for(let i=1;i<GHOST.length;i++) ctx.lineTo(GHOST[i][0],GHOST[i][1]);
+  ctx.closePath();
+  ctx.strokeStyle='rgba(100,140,220,0.06)';
+  ctx.lineWidth=1.0;
+  ctx.stroke();
+
+  // Arms — soft glow
+  for(const a of arms){
+    if(a.r < 2) continue;
+    // Circle
+    ctx.beginPath(); ctx.arc(a.x0,a.y0,a.r,0,TAU);
+    ctx.strokeStyle=`rgba(80,120,200,${Math.min(0.12, 0.8/a.r)})`;
+    ctx.lineWidth=0.6; ctx.stroke();
+    // Arm line
+    ctx.beginPath(); ctx.moveTo(a.x0,a.y0); ctx.lineTo(a.x1,a.y1);
+    ctx.strokeStyle='rgba(120,170,255,0.22)';
+    ctx.lineWidth=0.7; ctx.stroke();
   }
 
   // Trail
-  if(trail.length>1){
-    ctx.beginPath(); ctx.moveTo(trail[0].x,trail[0].y);
-    for(let i=1;i<trail.length;i++) ctx.lineTo(trail[i].x,trail[i].y);
-    if(phase==='holding') ctx.closePath();
-    ctx.strokeStyle=phase==='holding'?'rgba(220,235,255,0.96)':'rgba(200,222,255,0.88)';
-    ctx.lineWidth=phase==='holding'?1.8:1.4;
-    ctx.lineJoin='round'; ctx.lineCap='round'; ctx.stroke();
+  trailX[trailHead]=tip[0]; trailY[trailHead]=tip[1];
+  trailHead=(trailHead+1)%TRAIL_LEN;
+  if(trailHead===0) trailFull=true;
+  const len = trailFull ? TRAIL_LEN : trailHead;
+
+  if(len>1){
+    for(let i=1;i<len;i++){
+      const idx = trailFull ? (trailHead+i)%TRAIL_LEN : i;
+      const prev = trailFull ? (trailHead+i-1)%TRAIL_LEN : i-1;
+      const alpha = (i/len);
+      const bright = 0.3 + alpha*0.65;
+      const w = 0.8 + alpha*1.8;
+      ctx.beginPath();
+      ctx.moveTo(trailX[prev],trailY[prev]);
+      ctx.lineTo(trailX[idx],trailY[idx]);
+      ctx.strokeStyle=`rgba(200,222,255,${bright})`;
+      ctx.lineWidth=w;
+      ctx.stroke();
+    }
   }
 
-  // Arms (drawing only)
-  if(phase==='drawing'){
-    const{tip,arms}=evalEpicycles(t);
-    drawArms(arms);
-    ctx.beginPath(); ctx.arc(tip.x,tip.y,3.5,0,TAU);
-    ctx.fillStyle='rgba(255,255,255,0.95)'; ctx.fill();
-  }
+  // Tip dot
+  ctx.beginPath(); ctx.arc(tip[0],tip[1],3,0,TAU);
+  ctx.fillStyle='rgba(255,255,255,0.95)';
+  ctx.fill();
+  // Glow
+  const g=ctx.createRadialGradient(tip[0],tip[1],0,tip[0],tip[1],12);
+  g.addColorStop(0,'rgba(180,210,255,0.4)');
+  g.addColorStop(1,'rgba(180,210,255,0)');
+  ctx.beginPath(); ctx.arc(tip[0],tip[1],12,0,TAU);
+  ctx.fillStyle=g; ctx.fill();
 
   requestAnimationFrame(tick);
 }
 
-window.salah={
-  pause(){paused=true;},
-  resume(){paused=false;},
+window.salah = {
+  pause(){},
   forceComplete(){
-    paused=true; t=1; trail=[];
-    const N=500;
-    for(let i=0;i<=N;i++){const{tip}=evalEpicycles(i/N);trail.push({...tip});}
-    phase='holding';
-    ctx.fillStyle='#0a0a0f'; ctx.fillRect(0,0,S,S);
-    ctx.beginPath(); ctx.moveTo(trail[0].x,trail[0].y);
-    for(let i=1;i<trail.length;i++) ctx.lineTo(trail[i].x,trail[i].y);
+    ctx.fillStyle='#070710'; ctx.fillRect(0,0,S,S);
+    ctx.beginPath();
+    ctx.moveTo(GHOST[0][0],GHOST[0][1]);
+    for(let i=1;i<GHOST.length;i++) ctx.lineTo(GHOST[i][0],GHOST[i][1]);
     ctx.closePath();
-    ctx.strokeStyle='rgba(220,235,255,0.96)'; ctx.lineWidth=1.8;
-    ctx.lineJoin='round'; ctx.stroke();
+    ctx.strokeStyle='rgba(210,228,255,0.92)'; ctx.lineWidth=1.8; ctx.stroke();
   }
 };
 
